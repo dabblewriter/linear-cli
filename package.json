@@ -1,0 +1,35 @@
+{
+  "name": "@dabble/linear-cli",
+  "version": "1.0.0",
+  "description": "Linear CLI with unblocked issue filtering, built for AI-assisted development",
+  "type": "module",
+  "bin": {
+    "linear": "./bin/linear.mjs"
+  },
+  "scripts": {
+    "postinstall": "node postinstall.mjs",
+    "preuninstall": "node preuninstall.mjs"
+  },
+  "files": [
+    "bin/",
+    "claude/",
+    "postinstall.mjs",
+    "preuninstall.mjs"
+  ],
+  "keywords": [
+    "linear",
+    "cli",
+    "project-management",
+    "issues",
+    "claude"
+  ],
+  "author": "Dabble",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dabblewriter/linear-cli"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
