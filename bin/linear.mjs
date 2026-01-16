@@ -1687,7 +1687,11 @@ async function cmdLogin(args) {
   console.log('  2. Global, for all projects (~/.linear)');
   console.log('');
 
-  const locationChoice = await prompt('Enter number [1]: ') || '1';
+  const locationChoice = await prompt('Enter number: ');
+  if (locationChoice !== '1' && locationChoice !== '2') {
+    console.error(colors.red('Error: Please enter 1 or 2'));
+    process.exit(1);
+  }
   const saveGlobal = locationChoice === '2';
   console.log('');
 
@@ -1729,10 +1733,15 @@ async function cmdLogin(args) {
   console.log(`  ${teams.length + 1}. Create a new team...`);
   console.log('');
 
-  const selection = await prompt('Enter number [1]: ') || '1';
+  const selection = await prompt('Enter number: ');
+  const selectionNum = parseInt(selection);
+  if (!selection || isNaN(selectionNum) || selectionNum < 1 || selectionNum > teams.length + 1) {
+    console.error(colors.red('Error: Invalid selection'));
+    process.exit(1);
+  }
   let selectedKey = '';
 
-  if (parseInt(selection) === teams.length + 1) {
+  if (selectionNum === teams.length + 1) {
     // Create new team
     console.log('');
     const teamName = await prompt('Team name: ');
@@ -1764,12 +1773,7 @@ async function cmdLogin(args) {
       process.exit(1);
     }
   } else {
-    const idx = parseInt(selection) - 1;
-    if (idx < 0 || idx >= teams.length) {
-      console.error(colors.red('Error: Invalid selection'));
-      process.exit(1);
-    }
-    selectedKey = teams[idx].key;
+    selectedKey = teams[selectionNum - 1].key;
   }
 
   // Save config
