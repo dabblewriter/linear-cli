@@ -55,11 +55,6 @@ function loadConfig() {
   // Fall back to env vars if not set by config file
   if (!LINEAR_API_KEY) LINEAR_API_KEY = process.env.LINEAR_API_KEY || '';
   if (!TEAM_KEY) TEAM_KEY = process.env.LINEAR_TEAM || '';
-
-  if (!LINEAR_API_KEY || !TEAM_KEY) {
-    console.error(colors.red("Error: No config file found or missing API key or team key. Run 'linear login' first."));
-    process.exit(1);
-  }
 }
 
 function checkAuth() {
@@ -1684,17 +1679,26 @@ async function cmdStandup(args) {
 // ============================================================================
 
 async function cmdLogin(args) {
-  const opts = parseArgs(args, { global: 'boolean', g: 'boolean' });
-  const saveGlobal = opts.global || opts.g;
-
   console.log(colors.bold('Linear CLI Login\n'));
-  console.log('Opening Linear API settings in your browser...');
+
+  // Ask where to save credentials
+  console.log('Where would you like to save your credentials?\n');
+  console.log('  1. This project only (./.linear)');
+  console.log('  2. Global, for all projects (~/.linear)');
+  console.log('');
+
+  const locationChoice = await prompt('Enter number [1]: ') || '1';
+  const saveGlobal = locationChoice === '2';
+  console.log('');
+
+  // Explain and prompt before opening browser
+  console.log('To authenticate, you\'ll need a Linear API key.');
   console.log(colors.gray('(Create a new personal API key if you don\'t have one)\n'));
+  await prompt('Press Enter to open Linear\'s API settings in your browser...');
 
   openBrowser('https://linear.app/settings/api');
 
-  await new Promise(r => setTimeout(r, 1000));
-
+  console.log('');
   const apiKey = await prompt('Paste your API key: ');
 
   if (!apiKey) {
@@ -1869,8 +1873,7 @@ USAGE:
   linear <command> [options]
 
 AUTHENTICATION:
-  login [--global]           Login and save credentials to .linear
-    --global, -g             Save to ~/.linear instead of ./.linear
+  login                      Login and save credentials to .linear
   logout                     Remove saved credentials
   whoami                     Show current user and team
 

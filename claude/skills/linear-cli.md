@@ -17,12 +17,11 @@ linear login
 ```
 
 This will:
-1. Open Linear API settings in your browser
-2. Prompt you to paste your API key
-3. Show available teams and let you pick one (or create a new team)
-4. Save config to `./.linear`
-
-Use `--global` to save to `~/.linear` instead.
+1. Ask where to save credentials (project or global)
+2. Open Linear API settings in your browser
+3. Prompt you to paste your API key
+4. Show available teams and let you pick one (or create a new team)
+5. Save config to the chosen location
 
 ## Configuration
 
@@ -39,7 +38,6 @@ team=ISSUE
 ```bash
 # Auth
 linear login                    # Interactive setup
-linear login --global           # Save to ~/.linear
 linear logout                   # Remove config
 linear whoami                   # Show current user/team
 

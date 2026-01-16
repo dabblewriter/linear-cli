@@ -43,8 +43,7 @@ linear issue update ISSUE-1 --append "Found the root cause..."
 
 ### Authentication
 ```bash
-linear login              # Interactive setup, saves to ./.linear
-linear login --global     # Save to ~/.linear instead
+linear login              # Interactive setup (prompts for location)
 linear logout             # Remove config
 linear whoami             # Show current user and team
 ```
