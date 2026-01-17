@@ -1,43 +1,54 @@
 ---
 name: product-planning
 description: Facilitate product thinking and structure work in Linear.
-allowed-tools: Bash(linear:*), Bash(curl:*)
+allowed-tools: Bash(linear:*), Bash(curl:*), "WebFetch(domain:*)", "WebSearch"
 ---
 
 # Product Planning
 
 Help users think through product ideas and structure them as actionable work in Linear.
 
-## Start: Get Context
+## Mindset
+
+- **Thought partner, not ticket factory** - Understand before creating issues
+- **Problem before solution** - What problem? For whom? How painful?
+- **Default to smaller** - Cut scope ruthlessly, defer the non-essential
+- **Incremental delivery** - Ship value early, learn, iterate
+
+## Start: Gather Context
 
 ```bash
-linear roadmap        # Overview of projects, milestones, progress
-linear issues --open  # All active work
+linear roadmap        # Projects, milestones, progress
+linear issues --open  # Active work
 ```
+
+Read `product.md` if it exists—contains product vision, brand, tech decisions, prior planning context.
+
+Offer web research when exploring new territory (market landscape, competitors, technical feasibility).
 
 ## Process
 
 ### 1. Explore the Problem
 
-Before solutions, understand the problem:
+Before solutions:
 - What problem? For whom? How painful?
 - What happens if we don't solve it?
 - What constraints? (time, tech, dependencies)
+- What's uncertain or risky?
 
-### 2. Scope the Solution
+### 2. Design the Solution
 
-Push toward minimum viable scope:
-- What's the simplest version that delivers value?
-- What can we defer to later?
+- What approaches exist? Tradeoffs?
 - What's the riskiest assumption to test first?
+- What's the **simplest version** that delivers value?
+- What can wait for later?
+
+Push hard here. Cut scope aggressively.
 
 ### 3. Structure the Work
 
-**Sizing:**
-- XS/S/M: Single issue, < 1 day
-- L/XL: Needs breakdown into sub-issues
+**Sizing:** XS/S/M = single issue, < 1 day. L/XL = needs breakdown.
 
-**Breakdown pattern:**
 ```bash
 # Parent issue (the goal)
 linear issue create --title "User auth system" --estimate L --project "Phase 2"
@@ -45,56 +56,44 @@ linear issue create --title "User auth system" --estimate L --project "Phase 2"
 # Sub-issues (the steps)
 linear issue create --title "Design auth flow" --parent ISSUE-10 --estimate S
 linear issue create --title "Implement login" --parent ISSUE-10 --estimate M
-linear issue create --title "Add sessions" --parent ISSUE-10 --estimate M --blocked-by ISSUE-11
+linear issue create --title "Add sessions" --parent ISSUE-10 --blocked-by ISSUE-11 --estimate M
 ```
 
-### 4. Use Dependencies
+### 4. Organize
 
-Blockers make `--unblocked` useful:
+**Milestones** for phases within a project:
+```bash
+linear milestone create "Beta" --project "Phase 2" --target-date 2024-03-01
+linear issue create --title "Core feature" --milestone "Beta" --estimate M
+```
+
+**Dependencies** make `--unblocked` useful:
 ```bash
 linear issue create --title "Need API credentials" --blocks ISSUE-5
 ```
 
-### 5. Organize with Milestones
+### 5. Prioritize
 
-Group related issues into milestones within a project:
 ```bash
-# Create milestone
-linear milestone create "Beta Release" --project "Phase 2" --target-date 2024-03-01
-
-# Add issues to milestone
-linear issue create --title "Core feature" --milestone "Beta" --estimate M
-linear issue update ISSUE-5 --milestone "Beta"
-```
-
-### 6. Prioritize
-
-Reorder to reflect priority:
-```bash
-# Reorder projects
 linear projects reorder "Phase 1" "Phase 2" "Phase 3"
-
-# Reorder milestones within a project
-linear milestones reorder "Alpha" "Beta" "Stable" --project "Phase 2"
-
-# Move individual items
-linear project move "Urgent Fix" --before "Phase 1"
+linear milestones reorder "Alpha" "Beta" --project "Phase 2"
 linear issue move ISSUE-5 --before ISSUE-1
 ```
 
-## Scope Control
+## Update product.md
 
-When features grow, ask:
-- Is this essential for the core value?
-- Can this be a separate issue for later?
-- What's the cost of adding this now vs. later?
+After planning, update `product.md` with any new or refined:
+- Product vision, problem statement, target users
+- Brand voice or positioning
+- Technical architecture decisions
+- Key decisions made and rationale
+- Deferred items and why
 
-Default to smaller. Easier to add than remove.
+Create the file if it doesn't exist. Keep it concise.
 
 ## Session Summary
 
-After planning, summarize:
 1. **Created** - Issues/milestones with IDs
-2. **Organized** - Priority changes, milestone assignments
-3. **Open questions** - Things needing more thought
-4. **Next** - What to work on first (`linear issues --unblocked`)
+2. **Decided** - Key decisions and rationale
+3. **Deferred** - What we cut (and why)
+4. **Next** - `linear issues --unblocked`
