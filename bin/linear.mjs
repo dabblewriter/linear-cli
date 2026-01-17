@@ -180,9 +180,11 @@ async function cmdIssues(args) {
     unblocked: 'boolean', u: 'boolean',
     all: 'boolean', a: 'boolean',
     open: 'boolean', o: 'boolean',
+    backlog: 'boolean', b: 'boolean',
     mine: 'boolean', m: 'boolean',
     'in-progress': 'boolean',
     project: 'string', p: 'string',
+    milestone: 'string',
     state: 'string', s: 'string',
     label: 'string', l: 'string',
   });
@@ -191,8 +193,11 @@ async function cmdIssues(args) {
   const unblocked = opts.unblocked || opts.u;
   const allStates = opts.all || opts.a;
   const openOnly = opts.open || opts.o;
+  const backlogOnly = opts.backlog || opts.b;
   const mineOnly = opts.mine || opts.m;
-  const stateFilter = inProgress ? 'started' : (opts.state || opts.s || 'backlog');
+  const projectFilter = opts.project || opts.p;
+  const milestoneFilter = opts.milestone;
+  const stateFilter = opts.state || opts.s;
   const labelFilter = opts.label || opts.l;
 
   // Get current user ID for filtering/sorting
@@ -206,8 +211,10 @@ async function cmdIssues(args) {
           identifier
           title
           priority
+          sortOrder
           state { name type }
           project { name }
+          projectMilestone { name }
           assignee { id name }
           labels { nodes { name } }
           relations(first: 20) {
@@ -227,13 +234,16 @@ async function cmdIssues(args) {
   // Check if any issues have assignees (to decide whether to show column)
   const hasAssignees = issues.some(i => i.assignee);
 
-  // Sort: assigned to you first, then by identifier
+  // Sort: assigned to you first, then by priority, then by sortOrder
   issues.sort((a, b) => {
     const aIsMine = a.assignee?.id === viewerId;
     const bIsMine = b.assignee?.id === viewerId;
     if (aIsMine && !bIsMine) return -1;
     if (!aIsMine && bIsMine) return 1;
-    return a.identifier.localeCompare(b.identifier);
+    // Then by priority (higher = more urgent)
+    if ((b.priority || 0) !== (a.priority || 0)) return (b.priority || 0) - (a.priority || 0);
+    // Then by sortOrder
+    return (b.sortOrder || 0) - (a.sortOrder || 0);
   });
 
   // Helper to format issue row
@@ -251,7 +261,7 @@ async function cmdIssues(args) {
     return row;
   };
 
-  // Helper to apply common filters (mine, label)
+  // Helper to apply common filters (mine, label, project, milestone)
   const applyFilters = (list) => {
     let filtered = list;
     if (mineOnly) {
@@ -260,6 +270,16 @@ async function cmdIssues(args) {
     if (labelFilter) {
       filtered = filtered.filter(i =>
         i.labels?.nodes?.some(l => l.name.toLowerCase() === labelFilter.toLowerCase())
+      );
+    }
+    if (projectFilter) {
+      filtered = filtered.filter(i =>
+        i.project?.name?.toLowerCase().includes(projectFilter.toLowerCase())
+      );
+    }
+    if (milestoneFilter) {
+      filtered = filtered.filter(i =>
+        i.projectMilestone?.name?.toLowerCase().includes(milestoneFilter.toLowerCase())
       );
     }
     return filtered;
@@ -301,14 +321,28 @@ async function cmdIssues(args) {
 
     console.log(colors.bold('Open Issues:\n'));
     console.log(formatTable(filtered.map(formatRow)));
-  } else {
+  } else if (inProgress) {
+    let filtered = issues.filter(i => i.state.type === 'started');
+    filtered = applyFilters(filtered);
+
+    console.log(colors.bold('In Progress:\n'));
+    console.log(formatTable(filtered.map(formatRow)));
+  } else if (backlogOnly || stateFilter) {
+    const targetState = stateFilter || 'backlog';
     let filtered = issues.filter(i =>
-      i.state.type === stateFilter || i.state.name.toLowerCase() === stateFilter.toLowerCase()
+      i.state.type === targetState || i.state.name.toLowerCase() === targetState.toLowerCase()
     );
 
     filtered = applyFilters(filtered);
 
-    console.log(colors.bold(`Issues (${stateFilter}):\n`));
+    console.log(colors.bold(`Issues (${targetState}):\n`));
+    console.log(formatTable(filtered.map(formatRow)));
+  } else {
+    // Default: show backlog
+    let filtered = issues.filter(i => i.state.type === 'backlog');
+    filtered = applyFilters(filtered);
+
+    console.log(colors.bold('Issues (backlog):\n'));
     console.log(formatTable(filtered.map(formatRow)));
   }
 }
@@ -468,6 +502,7 @@ async function cmdIssueCreate(args) {
     title: 'string', t: 'string',
     description: 'string', d: 'string',
     project: 'string', p: 'string',
+    milestone: 'string',
     parent: 'string',
     state: 'string', s: 'string',
     assign: 'boolean',
@@ -480,6 +515,7 @@ async function cmdIssueCreate(args) {
   const title = opts.title || opts.t || opts._[0];
   const description = opts.description || opts.d || '';
   const project = opts.project || opts.p;
+  const milestone = opts.milestone;
   const parent = opts.parent;
   const shouldAssign = opts.assign;
   const estimate = (opts.estimate || opts.e || '').toLowerCase();
@@ -489,7 +525,7 @@ async function cmdIssueCreate(args) {
 
   if (!title) {
     console.error(colors.red('Error: Title is required'));
-    console.error('Usage: linear issue create --title "Issue title" [--project "..."] [--parent ISSUE-X] [--estimate M] [--assign] [--label bug] [--blocks ISSUE-X] [--blocked-by ISSUE-X]');
+    console.error('Usage: linear issue create --title "Issue title" [--project "..."] [--milestone "..."] [--parent ISSUE-X] [--estimate M] [--assign] [--label bug] [--blocks ISSUE-X] [--blocked-by ISSUE-X]');
     process.exit(1);
   }
 
@@ -508,17 +544,47 @@ async function cmdIssueCreate(args) {
     process.exit(1);
   }
 
-  // Look up project ID
+  // Look up project and milestone IDs
   let projectId = null;
-  if (project) {
+  let milestoneId = null;
+  if (project || milestone) {
     const projectsResult = await gql(`{
       team(id: "${TEAM_KEY}") {
-        projects(first: 50) { nodes { id name } }
+        projects(first: 50) {
+          nodes {
+            id name
+            projectMilestones { nodes { id name } }
+          }
+        }
       }
     }`);
     const projects = projectsResult.data?.team?.projects?.nodes || [];
-    const match = projects.find(p => p.name.toLowerCase().includes(project.toLowerCase()));
-    if (match) projectId = match.id;
+
+    if (project) {
+      const projectMatch = projects.find(p => p.name.toLowerCase().includes(project.toLowerCase()));
+      if (projectMatch) {
+        projectId = projectMatch.id;
+        // Look for milestone within this project
+        if (milestone) {
+          const milestoneMatch = projectMatch.projectMilestones?.nodes?.find(m =>
+            m.name.toLowerCase().includes(milestone.toLowerCase())
+          );
+          if (milestoneMatch) milestoneId = milestoneMatch.id;
+        }
+      }
+    } else if (milestone) {
+      // Search all projects for the milestone
+      for (const p of projects) {
+        const milestoneMatch = p.projectMilestones?.nodes?.find(m =>
+          m.name.toLowerCase().includes(milestone.toLowerCase())
+        );
+        if (milestoneMatch) {
+          projectId = p.id; // Auto-set project from milestone
+          milestoneId = milestoneMatch.id;
+          break;
+        }
+      }
+    }
   }
 
   // Look up label ID
@@ -556,6 +622,7 @@ async function cmdIssueCreate(args) {
 
   const input = { teamId, title, description };
   if (projectId) input.projectId = projectId;
+  if (milestoneId) input.projectMilestoneId = milestoneId;
   if (parent) input.parentId = parent;
   if (assigneeId) input.assigneeId = assigneeId;
   if (estimate) input.estimate = ESTIMATE_MAP[estimate];
@@ -611,6 +678,8 @@ async function cmdIssueUpdate(args) {
     title: 'string', t: 'string',
     description: 'string', d: 'string',
     state: 'string', s: 'string',
+    project: 'string', p: 'string',
+    milestone: 'string',
     append: 'string', a: 'string',
     blocks: 'string',
     'blocked-by': 'string',
@@ -618,6 +687,8 @@ async function cmdIssueUpdate(args) {
 
   const blocksIssue = opts.blocks;
   const blockedByIssue = opts['blocked-by'];
+  const projectName = opts.project || opts.p;
+  const milestoneName = opts.milestone;
   const input = {};
 
   if (opts.title || opts.t) input.title = opts.title || opts.t;
@@ -642,6 +713,46 @@ async function cmdIssueUpdate(args) {
     const states = statesResult.data?.team?.states?.nodes || [];
     const match = states.find(s => s.name.toLowerCase().includes(stateName.toLowerCase()));
     if (match) input.stateId = match.id;
+  }
+
+  // Handle project and milestone
+  if (projectName || milestoneName) {
+    const projectsResult = await gql(`{
+      team(id: "${TEAM_KEY}") {
+        projects(first: 50) {
+          nodes {
+            id name
+            projectMilestones { nodes { id name } }
+          }
+        }
+      }
+    }`);
+    const projects = projectsResult.data?.team?.projects?.nodes || [];
+
+    if (projectName) {
+      const projectMatch = projects.find(p => p.name.toLowerCase().includes(projectName.toLowerCase()));
+      if (projectMatch) {
+        input.projectId = projectMatch.id;
+        if (milestoneName) {
+          const milestoneMatch = projectMatch.projectMilestones?.nodes?.find(m =>
+            m.name.toLowerCase().includes(milestoneName.toLowerCase())
+          );
+          if (milestoneMatch) input.projectMilestoneId = milestoneMatch.id;
+        }
+      }
+    } else if (milestoneName) {
+      // Search all projects for the milestone
+      for (const p of projects) {
+        const milestoneMatch = p.projectMilestones?.nodes?.find(m =>
+          m.name.toLowerCase().includes(milestoneName.toLowerCase())
+        );
+        if (milestoneMatch) {
+          input.projectId = p.id;
+          input.projectMilestoneId = milestoneMatch.id;
+          break;
+        }
+      }
+    }
   }
 
   // Handle blocking relations (can be set even without other updates)
@@ -983,6 +1094,746 @@ async function cmdProjectComplete(args) {
     console.error(result.errors?.[0]?.message || JSON.stringify(result));
     process.exit(1);
   }
+}
+
+// ============================================================================
+// MILESTONES
+// ============================================================================
+
+async function cmdMilestones(args) {
+  const opts = parseArgs(args, {
+    project: 'string', p: 'string',
+    all: 'boolean', a: 'boolean',
+  });
+  const projectFilter = opts.project || opts.p;
+  const showAll = opts.all || opts.a;
+
+  const query = `{
+    team(id: "${TEAM_KEY}") {
+      projects(first: 50) {
+        nodes {
+          id name state
+          projectMilestones {
+            nodes { id name targetDate sortOrder status }
+          }
+        }
+      }
+    }
+  }`;
+
+  const result = await gql(query);
+  let projects = result.data?.team?.projects?.nodes || [];
+
+  // Filter to active projects unless --all
+  if (!showAll) {
+    projects = projects.filter(p => !['completed', 'canceled'].includes(p.state));
+  }
+
+  // Filter by project name if specified
+  if (projectFilter) {
+    projects = projects.filter(p => p.name.toLowerCase().includes(projectFilter.toLowerCase()));
+  }
+
+  console.log(colors.bold('Milestones:\n'));
+  for (const project of projects) {
+    const milestones = project.projectMilestones?.nodes || [];
+    if (milestones.length === 0) continue;
+
+    console.log(colors.bold(project.name));
+    for (const m of milestones) {
+      const date = m.targetDate ? ` (${m.targetDate})` : '';
+      const status = m.status !== 'planned' ? ` [${m.status}]` : '';
+      console.log(`  ${m.name}${date}${status}`);
+    }
+    console.log('');
+  }
+}
+
+async function cmdMilestoneShow(args) {
+  const milestoneName = args[0];
+  if (!milestoneName) {
+    console.error(colors.red('Error: Milestone name required'));
+    process.exit(1);
+  }
+
+  const query = `{
+    team(id: "${TEAM_KEY}") {
+      projects(first: 50) {
+        nodes {
+          name
+          projectMilestones {
+            nodes {
+              id name description targetDate status sortOrder
+              issues { nodes { identifier title state { name type } } }
+            }
+          }
+        }
+      }
+    }
+  }`;
+
+  const result = await gql(query);
+  const projects = result.data?.team?.projects?.nodes || [];
+
+  let milestone = null;
+  let projectName = '';
+  for (const p of projects) {
+    const m = p.projectMilestones?.nodes?.find(m =>
+      m.name.toLowerCase().includes(milestoneName.toLowerCase())
+    );
+    if (m) {
+      milestone = m;
+      projectName = p.name;
+      break;
+    }
+  }
+
+  if (!milestone) {
+    console.error(colors.red(`Milestone not found: ${milestoneName}`));
+    process.exit(1);
+  }
+
+  console.log(`# ${milestone.name}\n`);
+  console.log(`Project: ${projectName}`);
+  console.log(`Status: ${milestone.status}`);
+  if (milestone.targetDate) console.log(`Target: ${milestone.targetDate}`);
+  if (milestone.description) console.log(`\n## Description\n${milestone.description}`);
+
+  const issues = milestone.issues?.nodes || [];
+  if (issues.length > 0) {
+    // Group by state type
+    const done = issues.filter(i => i.state.type === 'completed');
+    const inProgress = issues.filter(i => i.state.type === 'started');
+    const backlog = issues.filter(i => !['completed', 'started', 'canceled'].includes(i.state.type));
+
+    console.log('\n## Issues\n');
+    if (inProgress.length > 0) {
+      console.log('### In Progress');
+      inProgress.forEach(i => console.log(`- ${i.identifier}: ${i.title}`));
+      console.log('');
+    }
+    if (backlog.length > 0) {
+      console.log('### Backlog');
+      backlog.forEach(i => console.log(`- ${i.identifier}: ${i.title}`));
+      console.log('');
+    }
+    if (done.length > 0) {
+      console.log('### Done');
+      done.forEach(i => console.log(`- ${i.identifier}: ${i.title}`));
+      console.log('');
+    }
+  }
+}
+
+async function cmdMilestoneCreate(args) {
+  const opts = parseArgs(args, {
+    name: 'string', n: 'string',
+    project: 'string', p: 'string',
+    description: 'string', d: 'string',
+    'target-date': 'string',
+  });
+
+  const name = opts.name || opts.n || opts._[0];
+  const projectName = opts.project || opts.p;
+  const description = opts.description || opts.d;
+  const targetDate = opts['target-date'];
+
+  if (!name) {
+    console.error(colors.red('Error: Milestone name required'));
+    console.error('Usage: linear milestone create "Name" --project "Project" [--target-date 2024-03-01]');
+    process.exit(1);
+  }
+
+  if (!projectName) {
+    console.error(colors.red('Error: Project required (--project)'));
+    process.exit(1);
+  }
+
+  // Find project
+  const projectsResult = await gql(`{
+    team(id: "${TEAM_KEY}") {
+      projects(first: 50) { nodes { id name } }
+    }
+  }`);
+  const projects = projectsResult.data?.team?.projects?.nodes || [];
+  const project = projects.find(p => p.name.toLowerCase().includes(projectName.toLowerCase()));
+
+  if (!project) {
+    console.error(colors.red(`Project not found: ${projectName}`));
+    process.exit(1);
+  }
+
+  const mutation = `
+    mutation($input: ProjectMilestoneCreateInput!) {
+      projectMilestoneCreate(input: $input) {
+        success
+        projectMilestone { id name }
+      }
+    }
+  `;
+
+  const input = { projectId: project.id, name };
+  if (description) input.description = description;
+  if (targetDate) input.targetDate = targetDate;
+
+  const result = await gql(mutation, { input });
+
+  if (result.data?.projectMilestoneCreate?.success) {
+    console.log(colors.green(`Created milestone: ${name}`));
+    console.log(`Project: ${project.name}`);
+  } else {
+    console.error(colors.red('Failed to create milestone'));
+    console.error(result.errors?.[0]?.message || JSON.stringify(result));
+    process.exit(1);
+  }
+}
+
+// ============================================================================
+// ROADMAP
+// ============================================================================
+
+async function cmdRoadmap(args) {
+  const opts = parseArgs(args, { all: 'boolean', a: 'boolean' });
+  const showAll = opts.all || opts.a;
+
+  // Fetch projects and milestones
+  const projectsQuery = `{
+    team(id: "${TEAM_KEY}") {
+      projects(first: 50) {
+        nodes {
+          id name state priority sortOrder targetDate startDate
+          projectMilestones {
+            nodes {
+              id name targetDate status sortOrder
+            }
+          }
+        }
+      }
+    }
+  }`;
+
+  // Fetch issues separately to avoid complexity limits
+  const issuesQuery = `{
+    team(id: "${TEAM_KEY}") {
+      issues(first: 200) {
+        nodes {
+          id identifier title state { name type } sortOrder priority
+          project { id }
+          projectMilestone { id }
+        }
+      }
+    }
+  }`;
+
+  const [projectsResult, issuesResult] = await Promise.all([
+    gql(projectsQuery),
+    gql(issuesQuery)
+  ]);
+
+  let projects = projectsResult.data?.team?.projects?.nodes || [];
+  const allIssues = issuesResult.data?.team?.issues?.nodes || [];
+
+  // Sort by sortOrder descending (higher = first)
+  projects.sort((a, b) => (b.sortOrder || 0) - (a.sortOrder || 0));
+
+  if (!showAll) {
+    projects = projects.filter(p => !['completed', 'canceled'].includes(p.state));
+  }
+
+  console.log(colors.bold('Roadmap\n'));
+
+  for (const project of projects) {
+    const issues = allIssues.filter(i => i.project?.id === project.id);
+    const milestones = project.projectMilestones?.nodes || [];
+
+    // Count issues by state
+    const done = issues.filter(i => i.state.type === 'completed').length;
+    const inProgress = issues.filter(i => i.state.type === 'started').length;
+    const backlog = issues.filter(i => !['completed', 'started', 'canceled'].includes(i.state.type)).length;
+
+    // Project header
+    const dates = [];
+    if (project.startDate) dates.push(`start: ${project.startDate}`);
+    if (project.targetDate) dates.push(`target: ${project.targetDate}`);
+    const dateStr = dates.length > 0 ? ` (${dates.join(', ')})` : '';
+    const priorityStr = project.priority > 0 ? ` [P${project.priority}]` : '';
+
+    console.log(colors.bold(`${project.name}${priorityStr}${dateStr}`));
+    console.log(`  ${colors.green(`✓ ${done}`)} done | ${colors.yellow(`→ ${inProgress}`)} in progress | ${colors.gray(`○ ${backlog}`)} backlog`);
+
+    // Show milestones with their issues
+    if (milestones.length > 0) {
+      // Sort milestones by sortOrder descending
+      milestones.sort((a, b) => (b.sortOrder || 0) - (a.sortOrder || 0));
+
+      for (const m of milestones) {
+        // Count issues in this milestone from project issues
+        const mIssues = issues.filter(i => i.projectMilestone?.id === m.id);
+        const mDone = mIssues.filter(i => i.state.type === 'completed').length;
+        const mTotal = mIssues.length;
+        const statusIcon = m.status === 'completed' ? colors.green('✓') :
+                          m.status === 'inProgress' ? colors.yellow('→') : '○';
+        const targetStr = m.targetDate ? ` (${m.targetDate})` : '';
+
+        console.log(`  ${statusIcon} ${m.name}${targetStr}: ${mDone}/${mTotal} done`);
+
+        // Show non-completed issues in this milestone
+        const issuesInMilestone = mIssues.filter(i =>
+          !['completed', 'canceled'].includes(i.state.type)
+        );
+
+        // Sort by priority then sortOrder
+        issuesInMilestone.sort((a, b) => {
+          if ((b.priority || 0) !== (a.priority || 0)) return (b.priority || 0) - (a.priority || 0);
+          return (b.sortOrder || 0) - (a.sortOrder || 0);
+        });
+
+        for (const i of issuesInMilestone.slice(0, 5)) {
+          const stateIcon = i.state.type === 'started' ? colors.yellow('→') : '○';
+          console.log(`    ${stateIcon} ${i.identifier}: ${i.title}`);
+        }
+        if (issuesInMilestone.length > 5) {
+          console.log(colors.gray(`    ... and ${issuesInMilestone.length - 5} more`));
+        }
+      }
+    }
+
+    // Show issues not in any milestone
+    const unmilestonedIssues = issues.filter(i =>
+      !i.projectMilestone &&
+      !['completed', 'canceled'].includes(i.state.type)
+    );
+
+    if (unmilestonedIssues.length > 0 && milestones.length > 0) {
+      console.log(colors.gray(`  (${unmilestonedIssues.length} issues not in milestones)`));
+    } else if (unmilestonedIssues.length > 0) {
+      // Sort by priority then sortOrder
+      unmilestonedIssues.sort((a, b) => {
+        if ((b.priority || 0) !== (a.priority || 0)) return (b.priority || 0) - (a.priority || 0);
+        return (b.sortOrder || 0) - (a.sortOrder || 0);
+      });
+
+      for (const i of unmilestonedIssues.slice(0, 5)) {
+        const stateIcon = i.state.type === 'started' ? colors.yellow('→') : '○';
+        console.log(`    ${stateIcon} ${i.identifier}: ${i.title}`);
+      }
+      if (unmilestonedIssues.length > 5) {
+        console.log(colors.gray(`    ... and ${unmilestonedIssues.length - 5} more`));
+      }
+    }
+
+    console.log('');
+  }
+}
+
+// ============================================================================
+// REORDERING
+// ============================================================================
+
+async function cmdProjectsReorder(args) {
+  if (args.length < 2) {
+    console.error(colors.red('Error: At least 2 project names required'));
+    console.error('Usage: linear projects reorder "Project A" "Project B" "Project C"');
+    process.exit(1);
+  }
+
+  // Get all projects
+  const projectsResult = await gql(`{
+    team(id: "${TEAM_KEY}") {
+      projects(first: 50) { nodes { id name sortOrder } }
+    }
+  }`);
+  const allProjects = projectsResult.data?.team?.projects?.nodes || [];
+
+  // Match provided names to projects
+  const orderedProjects = [];
+  for (const name of args) {
+    const match = allProjects.find(p => p.name.toLowerCase().includes(name.toLowerCase()));
+    if (!match) {
+      console.error(colors.red(`Project not found: ${name}`));
+      process.exit(1);
+    }
+    orderedProjects.push(match);
+  }
+
+  // Assign new sortOrders (highest first)
+  const baseSort = Math.max(...allProjects.map(p => p.sortOrder || 0)) + 1000;
+  const mutations = [];
+
+  for (let i = 0; i < orderedProjects.length; i++) {
+    const newSortOrder = baseSort - (i * 1000);
+    mutations.push(gql(`
+      mutation {
+        projectUpdate(id: "${orderedProjects[i].id}", input: { sortOrder: ${newSortOrder} }) {
+          success
+        }
+      }
+    `));
+  }
+
+  await Promise.all(mutations);
+  console.log(colors.green('Reordered projects:'));
+  orderedProjects.forEach((p, i) => console.log(`  ${i + 1}. ${p.name}`));
+}
+
+async function cmdProjectMove(args) {
+  const opts = parseArgs(args, {
+    before: 'string',
+    after: 'string',
+  });
+
+  const projectName = opts._[0];
+  const beforeName = opts.before;
+  const afterName = opts.after;
+
+  if (!projectName) {
+    console.error(colors.red('Error: Project name required'));
+    console.error('Usage: linear project move "Project" --before "Other" or --after "Other"');
+    process.exit(1);
+  }
+
+  if (!beforeName && !afterName) {
+    console.error(colors.red('Error: --before or --after required'));
+    process.exit(1);
+  }
+
+  // Get all projects
+  const projectsResult = await gql(`{
+    team(id: "${TEAM_KEY}") {
+      projects(first: 50) { nodes { id name sortOrder } }
+    }
+  }`);
+  const projects = projectsResult.data?.team?.projects?.nodes || [];
+  projects.sort((a, b) => (b.sortOrder || 0) - (a.sortOrder || 0));
+
+  const project = projects.find(p => p.name.toLowerCase().includes(projectName.toLowerCase()));
+  const target = projects.find(p => p.name.toLowerCase().includes((beforeName || afterName).toLowerCase()));
+
+  if (!project) {
+    console.error(colors.red(`Project not found: ${projectName}`));
+    process.exit(1);
+  }
+  if (!target) {
+    console.error(colors.red(`Target project not found: ${beforeName || afterName}`));
+    process.exit(1);
+  }
+
+  const targetIdx = projects.findIndex(p => p.id === target.id);
+  let newSortOrder;
+
+  if (beforeName) {
+    // Insert before target (higher sortOrder)
+    const prevProject = projects[targetIdx - 1];
+    if (prevProject) {
+      newSortOrder = (target.sortOrder + prevProject.sortOrder) / 2;
+    } else {
+      newSortOrder = target.sortOrder + 1000;
+    }
+  } else {
+    // Insert after target (lower sortOrder)
+    const nextProject = projects[targetIdx + 1];
+    if (nextProject) {
+      newSortOrder = (target.sortOrder + nextProject.sortOrder) / 2;
+    } else {
+      newSortOrder = target.sortOrder - 1000;
+    }
+  }
+
+  await gql(`
+    mutation {
+      projectUpdate(id: "${project.id}", input: { sortOrder: ${newSortOrder} }) {
+        success
+      }
+    }
+  `);
+
+  console.log(colors.green(`Moved "${project.name}" ${beforeName ? 'before' : 'after'} "${target.name}"`));
+}
+
+async function cmdMilestonesReorder(args) {
+  const opts = parseArgs(args, { project: 'string', p: 'string' });
+  const projectName = opts.project || opts.p;
+  const milestoneNames = opts._;
+
+  if (!projectName) {
+    console.error(colors.red('Error: --project required'));
+    console.error('Usage: linear milestones reorder "M1" "M2" "M3" --project "Project"');
+    process.exit(1);
+  }
+
+  if (milestoneNames.length < 2) {
+    console.error(colors.red('Error: At least 2 milestone names required'));
+    process.exit(1);
+  }
+
+  // Get project with milestones
+  const projectsResult = await gql(`{
+    team(id: "${TEAM_KEY}") {
+      projects(first: 50) {
+        nodes {
+          id name
+          projectMilestones { nodes { id name sortOrder } }
+        }
+      }
+    }
+  }`);
+  const projects = projectsResult.data?.team?.projects?.nodes || [];
+  const project = projects.find(p => p.name.toLowerCase().includes(projectName.toLowerCase()));
+
+  if (!project) {
+    console.error(colors.red(`Project not found: ${projectName}`));
+    process.exit(1);
+  }
+
+  const allMilestones = project.projectMilestones?.nodes || [];
+
+  // Match provided names to milestones
+  const orderedMilestones = [];
+  for (const name of milestoneNames) {
+    const match = allMilestones.find(m => m.name.toLowerCase().includes(name.toLowerCase()));
+    if (!match) {
+      console.error(colors.red(`Milestone not found: ${name}`));
+      process.exit(1);
+    }
+    orderedMilestones.push(match);
+  }
+
+  // Assign new sortOrders
+  const baseSort = Math.max(...allMilestones.map(m => m.sortOrder || 0)) + 1000;
+  const mutations = [];
+
+  for (let i = 0; i < orderedMilestones.length; i++) {
+    const newSortOrder = baseSort - (i * 1000);
+    mutations.push(gql(`
+      mutation {
+        projectMilestoneUpdate(id: "${orderedMilestones[i].id}", input: { sortOrder: ${newSortOrder} }) {
+          success
+        }
+      }
+    `));
+  }
+
+  await Promise.all(mutations);
+  console.log(colors.green(`Reordered milestones in ${project.name}:`));
+  orderedMilestones.forEach((m, i) => console.log(`  ${i + 1}. ${m.name}`));
+}
+
+async function cmdMilestoneMove(args) {
+  const opts = parseArgs(args, {
+    before: 'string',
+    after: 'string',
+  });
+
+  const milestoneName = opts._[0];
+  const beforeName = opts.before;
+  const afterName = opts.after;
+
+  if (!milestoneName) {
+    console.error(colors.red('Error: Milestone name required'));
+    process.exit(1);
+  }
+
+  if (!beforeName && !afterName) {
+    console.error(colors.red('Error: --before or --after required'));
+    process.exit(1);
+  }
+
+  // Get all projects with milestones
+  const projectsResult = await gql(`{
+    team(id: "${TEAM_KEY}") {
+      projects(first: 50) {
+        nodes {
+          id name
+          projectMilestones { nodes { id name sortOrder } }
+        }
+      }
+    }
+  }`);
+  const projects = projectsResult.data?.team?.projects?.nodes || [];
+
+  // Find milestone and its project
+  let milestone = null;
+  let projectMilestones = [];
+  for (const p of projects) {
+    const m = p.projectMilestones?.nodes?.find(m =>
+      m.name.toLowerCase().includes(milestoneName.toLowerCase())
+    );
+    if (m) {
+      milestone = m;
+      projectMilestones = p.projectMilestones.nodes;
+      projectMilestones.sort((a, b) => (b.sortOrder || 0) - (a.sortOrder || 0));
+      break;
+    }
+  }
+
+  if (!milestone) {
+    console.error(colors.red(`Milestone not found: ${milestoneName}`));
+    process.exit(1);
+  }
+
+  const target = projectMilestones.find(m =>
+    m.name.toLowerCase().includes((beforeName || afterName).toLowerCase())
+  );
+
+  if (!target) {
+    console.error(colors.red(`Target milestone not found: ${beforeName || afterName}`));
+    process.exit(1);
+  }
+
+  const targetIdx = projectMilestones.findIndex(m => m.id === target.id);
+  let newSortOrder;
+
+  if (beforeName) {
+    const prevMilestone = projectMilestones[targetIdx - 1];
+    if (prevMilestone) {
+      newSortOrder = (target.sortOrder + prevMilestone.sortOrder) / 2;
+    } else {
+      newSortOrder = target.sortOrder + 1000;
+    }
+  } else {
+    const nextMilestone = projectMilestones[targetIdx + 1];
+    if (nextMilestone) {
+      newSortOrder = (target.sortOrder + nextMilestone.sortOrder) / 2;
+    } else {
+      newSortOrder = target.sortOrder - 1000;
+    }
+  }
+
+  await gql(`
+    mutation {
+      projectMilestoneUpdate(id: "${milestone.id}", input: { sortOrder: ${newSortOrder} }) {
+        success
+      }
+    }
+  `);
+
+  console.log(colors.green(`Moved "${milestone.name}" ${beforeName ? 'before' : 'after'} "${target.name}"`));
+}
+
+async function cmdIssuesReorder(args) {
+  if (args.length < 2) {
+    console.error(colors.red('Error: At least 2 issue IDs required'));
+    console.error('Usage: linear issues reorder ISSUE-1 ISSUE-2 ISSUE-3');
+    process.exit(1);
+  }
+
+  // Get issues to verify they exist
+  const query = `{
+    team(id: "${TEAM_KEY}") {
+      issues(first: 100) {
+        nodes { id identifier sortOrder }
+      }
+    }
+  }`;
+
+  const result = await gql(query);
+  const allIssues = result.data?.team?.issues?.nodes || [];
+
+  // Match provided IDs to issues
+  const orderedIssues = [];
+  for (const id of args) {
+    const match = allIssues.find(i => i.identifier === id.toUpperCase());
+    if (!match) {
+      console.error(colors.red(`Issue not found: ${id}`));
+      process.exit(1);
+    }
+    orderedIssues.push(match);
+  }
+
+  // Assign new sortOrders
+  const baseSort = Math.max(...allIssues.map(i => i.sortOrder || 0)) + 1000;
+  const mutations = [];
+
+  for (let i = 0; i < orderedIssues.length; i++) {
+    const newSortOrder = baseSort - (i * 1000);
+    mutations.push(gql(`
+      mutation {
+        issueUpdate(id: "${orderedIssues[i].identifier}", input: { sortOrder: ${newSortOrder} }) {
+          success
+        }
+      }
+    `));
+  }
+
+  await Promise.all(mutations);
+  console.log(colors.green('Reordered issues:'));
+  orderedIssues.forEach((i, idx) => console.log(`  ${idx + 1}. ${i.identifier}`));
+}
+
+async function cmdIssueMove(args) {
+  const opts = parseArgs(args, {
+    before: 'string',
+    after: 'string',
+  });
+
+  const issueId = opts._[0];
+  const beforeId = opts.before;
+  const afterId = opts.after;
+
+  if (!issueId) {
+    console.error(colors.red('Error: Issue ID required'));
+    console.error('Usage: linear issue move ISSUE-1 --before ISSUE-2 or --after ISSUE-2');
+    process.exit(1);
+  }
+
+  if (!beforeId && !afterId) {
+    console.error(colors.red('Error: --before or --after required'));
+    process.exit(1);
+  }
+
+  // Get issues
+  const query = `{
+    team(id: "${TEAM_KEY}") {
+      issues(first: 100) {
+        nodes { id identifier sortOrder }
+      }
+    }
+  }`;
+
+  const result = await gql(query);
+  const issues = result.data?.team?.issues?.nodes || [];
+  issues.sort((a, b) => (b.sortOrder || 0) - (a.sortOrder || 0));
+
+  const issue = issues.find(i => i.identifier === issueId.toUpperCase());
+  const target = issues.find(i => i.identifier === (beforeId || afterId).toUpperCase());
+
+  if (!issue) {
+    console.error(colors.red(`Issue not found: ${issueId}`));
+    process.exit(1);
+  }
+  if (!target) {
+    console.error(colors.red(`Target issue not found: ${beforeId || afterId}`));
+    process.exit(1);
+  }
+
+  const targetIdx = issues.findIndex(i => i.identifier === target.identifier);
+  let newSortOrder;
+
+  if (beforeId) {
+    const prevIssue = issues[targetIdx - 1];
+    if (prevIssue) {
+      newSortOrder = (target.sortOrder + prevIssue.sortOrder) / 2;
+    } else {
+      newSortOrder = target.sortOrder + 1000;
+    }
+  } else {
+    const nextIssue = issues[targetIdx + 1];
+    if (nextIssue) {
+      newSortOrder = (target.sortOrder + nextIssue.sortOrder) / 2;
+    } else {
+      newSortOrder = target.sortOrder - 1000;
+    }
+  }
+
+  await gql(`
+    mutation {
+      issueUpdate(id: "${issue.identifier}", input: { sortOrder: ${newSortOrder} }) {
+        success
+      }
+    }
+  `);
+
+  console.log(colors.green(`Moved ${issue.identifier} ${beforeId ? 'before' : 'after'} ${target.identifier}`));
 }
 
 // ============================================================================
@@ -1881,15 +2732,23 @@ AUTHENTICATION:
   logout                     Remove saved credentials
   whoami                     Show current user and team
 
+PLANNING:
+  roadmap [options]          Overview of projects, milestones, and issues
+    --all, -a                Include completed projects
+
 ISSUES:
-  issues [options]           List issues (yours shown first)
+  issues [options]           List issues (default: backlog, yours first)
     --unblocked, -u          Show only unblocked issues
     --open, -o               Show all non-completed/canceled issues
+    --backlog, -b            Show only backlog issues
     --all, -a                Show all states (including completed)
     --mine, -m               Show only issues assigned to you
     --in-progress            Show issues in progress
-    --state, -s <state>      Filter by state (default: backlog)
+    --project, -p <name>     Filter by project
+    --milestone <name>       Filter by milestone
+    --state, -s <state>      Filter by state
     --label, -l <name>       Filter by label
+  issues reorder <ids...>    Reorder issues by listing IDs in order
 
   issue show <id>            Show issue details with parent context
   issue start <id>           Assign to yourself and set to In Progress
@@ -1897,6 +2756,7 @@ ISSUES:
     --title, -t <title>      Issue title (required)
     --description, -d <desc> Issue description
     --project, -p <name>     Add to project
+    --milestone <name>       Add to milestone
     --parent <id>            Parent issue (for sub-issues)
     --assign                 Assign to yourself
     --estimate, -e <size>    Estimate: XS, S, M, L, XL
@@ -1907,20 +2767,47 @@ ISSUES:
     --title, -t <title>      New title
     --description, -d <desc> New description
     --state, -s <state>      New state
+    --project, -p <name>     Move to project
+    --milestone <name>       Move to milestone
     --append, -a <text>      Append to description
     --blocks <id>            Add blocking relation
     --blocked-by <id>        Add blocked-by relation
   issue close <id>           Mark issue as done
   issue comment <id> <body>  Add a comment
+  issue move <id>            Move issue in sort order
+    --before <id>            Move before this issue
+    --after <id>             Move after this issue
 
 PROJECTS:
   projects [options]         List projects
     --all, -a                Include completed projects
-  project show <name>        Show project details
+  projects reorder <names..> Reorder projects by listing names in order
+
+  project show <name>        Show project details with issues
   project create [options]   Create a new project
     --name, -n <name>        Project name (required)
     --description, -d <desc> Project description
   project complete <name>    Mark project as completed
+  project move <name>        Move project in sort order
+    --before <name>          Move before this project
+    --after <name>           Move after this project
+
+MILESTONES:
+  milestones [options]       List milestones by project
+    --project, -p <name>     Filter by project
+    --all, -a                Include completed projects
+  milestones reorder <names> Reorder milestones (requires --project)
+    --project, -p <name>     Project containing milestones
+
+  milestone show <name>      Show milestone with issues
+  milestone create [options] Create a new milestone
+    --name, -n <name>        Milestone name (required)
+    --project, -p <name>     Project (required)
+    --description, -d <desc> Milestone description
+    --target-date <date>     Target date (YYYY-MM-DD)
+  milestone move <name>      Move milestone in sort order
+    --before <name>          Move before this milestone
+    --after <name>           Move after this milestone
 
 LABELS:
   labels                     List all labels
@@ -1952,15 +2839,12 @@ CONFIGURATION:
     team=ISSUE
 
 EXAMPLES:
-  linear login               # First-time setup
+  linear roadmap             # See all projects and milestones
   linear issues --unblocked  # Find workable issues
-  linear issues --in-progress # See what you're working on
-  linear issue show ISSUE-1   # View with parent context
-  linear issue start ISSUE-1  # Assign and start working
-  linear issue create --title "Fix bug" --project "Phase 1" --assign --estimate M
-  linear issue create --title "Needs API key" --blocked-by ISSUE-5
-  linear issue update ISSUE-1 --append "Found the root cause..."
-  linear branch ISSUE-5       # Create git branch for issue
+  linear issues --project "Phase 1"  # Issues in a project
+  linear issue create --title "Fix bug" --milestone "Beta" --estimate M
+  linear projects reorder "Phase 1" "Phase 2" "Phase 3"
+  linear project move "Phase 3" --before "Phase 1"
 `);
 }
 
@@ -1990,10 +2874,16 @@ async function main() {
       case 'whoami':
         await cmdWhoami();
         break;
-      case 'issues':
+      case 'issues': {
         checkAuth();
-        await cmdIssues(args.slice(1));
+        // Check for "issues reorder" subcommand
+        if (args[1] === 'reorder') {
+          await cmdIssuesReorder(args.slice(2));
+        } else {
+          await cmdIssues(args.slice(1));
+        }
         break;
+      }
       case 'issue': {
         checkAuth();
         const subcmd = args[1];
@@ -2005,16 +2895,23 @@ async function main() {
           case 'start': await cmdIssueStart(subargs); break;
           case 'close': await cmdIssueClose(subargs); break;
           case 'comment': await cmdIssueComment(subargs); break;
+          case 'move': await cmdIssueMove(subargs); break;
           default:
             console.error(`Unknown issue command: ${subcmd}`);
             process.exit(1);
         }
         break;
       }
-      case 'projects':
+      case 'projects': {
         checkAuth();
-        await cmdProjects(args.slice(1));
+        // Check for "projects reorder" subcommand
+        if (args[1] === 'reorder') {
+          await cmdProjectsReorder(args.slice(2));
+        } else {
+          await cmdProjects(args.slice(1));
+        }
         break;
+      }
       case 'project': {
         checkAuth();
         const subcmd = args[1];
@@ -2023,12 +2920,41 @@ async function main() {
           case 'show': await cmdProjectShow(subargs); break;
           case 'create': await cmdProjectCreate(subargs); break;
           case 'complete': await cmdProjectComplete(subargs); break;
+          case 'move': await cmdProjectMove(subargs); break;
           default:
             console.error(`Unknown project command: ${subcmd}`);
             process.exit(1);
         }
         break;
       }
+      case 'milestones': {
+        checkAuth();
+        // Check for "milestones reorder" subcommand
+        if (args[1] === 'reorder') {
+          await cmdMilestonesReorder(args.slice(2));
+        } else {
+          await cmdMilestones(args.slice(1));
+        }
+        break;
+      }
+      case 'milestone': {
+        checkAuth();
+        const subcmd = args[1];
+        const subargs = args.slice(2);
+        switch (subcmd) {
+          case 'show': await cmdMilestoneShow(subargs); break;
+          case 'create': await cmdMilestoneCreate(subargs); break;
+          case 'move': await cmdMilestoneMove(subargs); break;
+          default:
+            console.error(`Unknown milestone command: ${subcmd}`);
+            process.exit(1);
+        }
+        break;
+      }
+      case 'roadmap':
+        checkAuth();
+        await cmdRoadmap(args.slice(1));
+        break;
       case 'labels':
         checkAuth();
         await cmdLabels();
