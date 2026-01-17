@@ -1,136 +1,100 @@
 ---
 name: product-planning
-description: Help with product planning, feature brainstorming, and backlog management using Linear.
+description: Facilitate product thinking and structure work in Linear.
 allowed-tools: Bash(linear:*), Bash(curl:*)
 ---
 
-# Product Planning Skill
+# Product Planning
 
-Help the developer think through product direction, brainstorm features, and manage their Linear backlog.
+Help users think through product ideas and structure them as actionable work in Linear.
 
-## When to Use This Skill
-
-Use this skill when the developer wants to:
-- Brainstorm new features or improvements
-- Review and prioritize the backlog
-- Break down large ideas into actionable issues
-- Plan a new phase or milestone
-- Think through product strategy
-
-## Approach
-
-### 1. Understand Current State
-
-First, gather context:
+## Start: Get Context
 
 ```bash
-# See all open issues (backlog + in progress, excludes completed)
-linear issues --open
-
-# See active projects/phases
-linear projects
+linear roadmap        # Overview of projects, milestones, progress
+linear issues --open  # All active work
 ```
 
-### 2. Facilitate Discussion
+## Process
 
-Ask good questions to help clarify thinking:
+### 1. Explore the Problem
 
-- "What problem are we trying to solve?"
-- "Who benefits from this feature?"
-- "What's the simplest version that would be valuable?"
-- "What are the dependencies or blockers?"
-- "How does this fit with the current phase?"
+Before solutions, understand the problem:
+- What problem? For whom? How painful?
+- What happens if we don't solve it?
+- What constraints? (time, tech, dependencies)
 
-### 3. Break Down Ideas
+### 2. Scope the Solution
 
-When a feature is identified, help break it into Linear issues:
+Push toward minimum viable scope:
+- What's the simplest version that delivers value?
+- What can we defer to later?
+- What's the riskiest assumption to test first?
 
-**For small features (S/M):**
-- Create a single issue with clear acceptance criteria
-- Assign appropriate estimate
+### 3. Structure the Work
 
-**For large features (L/XL):**
-- Create a parent issue describing the overall goal
-- Break into sub-issues, each S or M sized
-- Identify dependencies between sub-issues
+**Sizing:**
+- XS/S/M: Single issue, < 1 day
+- L/XL: Needs breakdown into sub-issues
 
+**Breakdown pattern:**
 ```bash
-# Create parent issue
-linear issue create --title "User authentication system" --estimate L --project "Phase 2"
+# Parent issue (the goal)
+linear issue create --title "User auth system" --estimate L --project "Phase 2"
 
-# Create sub-issues
+# Sub-issues (the steps)
 linear issue create --title "Design auth flow" --parent ISSUE-10 --estimate S
-linear issue create --title "Implement login endpoint" --parent ISSUE-10 --estimate M
-linear issue create --title "Add session management" --parent ISSUE-10 --estimate M --blocked-by ISSUE-12
+linear issue create --title "Implement login" --parent ISSUE-10 --estimate M
+linear issue create --title "Add sessions" --parent ISSUE-10 --estimate M --blocked-by ISSUE-11
 ```
 
-### 4. Organize Into Phases
+### 4. Use Dependencies
 
-If planning a new phase:
-
+Blockers make `--unblocked` useful:
 ```bash
-# Create the phase
-linear project create "Phase 3: User Dashboard" --description "Build the main user-facing dashboard with key metrics"
-
-# Add issues to it
-linear issue create --title "Dashboard layout" --project "Phase 3" --estimate M
+linear issue create --title "Need API credentials" --blocks ISSUE-5
 ```
 
-## Brainstorming Prompts
+### 5. Organize with Milestones
 
-When the developer is stuck, try these prompts:
+Group related issues into milestones within a project:
+```bash
+# Create milestone
+linear milestone create "Beta Release" --project "Phase 2" --target-date 2024-03-01
 
-**For new features:**
-- "What do users complain about most?"
-- "What manual process could we automate?"
-- "What would make you excited to use this product?"
-
-**For improvements:**
-- "Where do users get confused?"
-- "What takes too long?"
-- "What breaks most often?"
-
-**For prioritization:**
-- "What would have the biggest impact with the least effort?"
-- "What's blocking other work?"
-- "What do users ask for most?"
-
-## Output Format
-
-After a planning session, summarize:
-
-1. **New issues created** - List with IDs and estimates
-2. **Backlog changes** - Any reprioritization or updates
-3. **Next steps** - What to work on next
-4. **Open questions** - Things that need more thought
-
-## Example Session
-
-```
-Developer: "I want to add user notifications"
-
-Claude: Let me check the current state...
-[runs linear issues --all]
-
-Good context. A few questions:
-1. What triggers notifications? (events, mentions, etc.)
-2. Where do they appear? (in-app, email, push?)
-3. Is this blocking other work?
-
-Developer: "Just in-app for now, triggered by comments on their issues"
-
-That's a nicely scoped M-sized feature. Let me create it:
-[runs linear issue create --title "In-app notifications for issue comments" --estimate M --project "Phase 2"]
-
-Created ISSUE-15. Should I break this down further, or is it small enough to tackle as one unit?
+# Add issues to milestone
+linear issue create --title "Core feature" --milestone "Beta" --estimate M
+linear issue update ISSUE-5 --milestone "Beta"
 ```
 
-## Integration with /next
+### 6. Prioritize
 
-When invoked from the `/next` command (user chose "product planning"), start by asking:
+Reorder to reflect priority:
+```bash
+# Reorder projects
+linear projects reorder "Phase 1" "Phase 2" "Phase 3"
 
-"What would you like to focus on today?"
-- Review and prioritize the backlog
-- Brainstorm new features
-- Plan the next phase
-- Something specific (let them describe)
+# Reorder milestones within a project
+linear milestones reorder "Alpha" "Beta" "Stable" --project "Phase 2"
+
+# Move individual items
+linear project move "Urgent Fix" --before "Phase 1"
+linear issue move ISSUE-5 --before ISSUE-1
+```
+
+## Scope Control
+
+When features grow, ask:
+- Is this essential for the core value?
+- Can this be a separate issue for later?
+- What's the cost of adding this now vs. later?
+
+Default to smaller. Easier to add than remove.
+
+## Session Summary
+
+After planning, summarize:
+1. **Created** - Issues/milestones with IDs
+2. **Organized** - Priority changes, milestone assignments
+3. **Open questions** - Things needing more thought
+4. **Next** - What to work on first (`linear issues --unblocked`)
