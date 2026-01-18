@@ -24,10 +24,10 @@ Run `linear standup` to get:
 ## After Running
 
 1. Present the output from `linear standup` to the user
-2. Offer to help with:
-   - Drafting a standup message for Slack/Teams
-   - Identifying what to work on next (suggest `/next`)
-   - Resolving any blockers
+2. Ask what they want to do next:
+   - Draft standup message (for Slack/Teams)
+   - Find next issue (run /next)
+   - Resolve blockers
 
 ## Example Flow
 
@@ -52,7 +52,7 @@ Here's your standup summary:
 - 4 commits on beautiful-tech
 - PR #42 merged: ISSUE-5: Add caching layer
 
-Would you like me to help draft a standup message, or shall we look at what to work on next?
+[Presents options above]
 ```
 
 ## Notes

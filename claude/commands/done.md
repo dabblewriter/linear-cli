@@ -15,11 +15,11 @@ Help the developer wrap up their work on the current Linear issue.
 2. **Summarize the work** by checking:
    - `git log --oneline <base>..HEAD` to see commits
    - `git diff --stat <base>..HEAD` to see files changed
-3. **Ask what they want to do** using AskUserQuestion:
-   - Close the issue in Linear
-   - Create a PR first
-   - Add final notes to the issue
-   - Just clean up (worktree only)
+3. **Ask what they want to do:**
+   - Create PR and close
+   - Close issue (no PR)
+   - Add notes and close
+   - Just clean up (keep issue open)
 
 ## After Selection
 
@@ -50,11 +50,7 @@ You've made 3 commits on ISSUE-12: Add caching layer
 - src/cache.ts (new file, 45 lines)
 - src/api.ts (modified, +12 -3)
 
-What would you like to do?
-1. Create PR and close issue
-2. Close issue (no PR)
-3. Add notes and close
-4. Just clean up worktree (don't close)
+[Presents options above]
 ```
 
 ## Notes

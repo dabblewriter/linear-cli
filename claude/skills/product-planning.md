@@ -1,7 +1,6 @@
 ---
 name: product-planning
 description: Facilitate product thinking and structure work in Linear.
-allowed-tools: Bash(linear:*), Bash(curl:*), "WebFetch(domain:*)", "WebSearch"
 ---
 
 # Product Planning
@@ -28,8 +27,6 @@ linear issues --open  # Active work
 
 Read `product.md` if it exists—contains product vision, brand, tech decisions, prior planning context.
 
-Offer web research when exploring new territory (market landscape, competitors, technical feasibility).
-
 ## Process
 
 ### 1. Explore the Problem
@@ -41,6 +38,8 @@ Before solutions:
 - What constraints? (time, tech, dependencies)
 - What's uncertain or risky?
 
+Proactively search the web when exploring unfamiliar territory (competitors, market, technical approaches).
+
 ### 2. Design the Solution
 
 - What approaches exist? Tradeoffs?
@@ -50,6 +49,8 @@ Before solutions:
 - How will users discover and use this? What's prominent vs. hidden?
 
 Cut scope aggressively—except for core/differentiating features where polish and detail set you apart.
+
+For technical work, explore the existing codebase first to understand patterns and architecture.
 
 ### 3. Structure the Work
 
@@ -98,6 +99,8 @@ After planning, update `product.md` with any new or refined:
 Create the file if it doesn't exist. Keep it concise.
 
 ## Session Summary
+
+Track progress throughout the session, then summarize:
 
 1. **Created** - Issues/milestones with IDs
 2. **Decided** - Key decisions and rationale
