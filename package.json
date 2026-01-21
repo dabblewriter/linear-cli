@@ -1,6 +1,6 @@
 {
   "name": "@dabble/linear-cli",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Linear CLI with unblocked issue filtering, built for AI-assisted development",
   "type": "module",
   "bin": {
