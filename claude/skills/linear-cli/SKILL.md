@@ -31,6 +31,45 @@ Config is loaded in order: `./.linear` → `~/.linear` → env vars
 # .linear file format
 api_key=lin_api_xxx
 team=ISSUE
+
+[aliases]
+V2=Version 2.0 Release
+MVP=MVP Milestone
+```
+
+## Aliases
+
+Create short codes for projects and milestones to use in commands:
+
+```bash
+# Create aliases
+linear alias V2 "Version 2.0"           # For a project
+linear alias MVP "MVP Milestone"        # For a milestone
+
+# List all aliases
+linear alias --list
+
+# Remove an alias
+linear alias --remove MVP
+```
+
+Use aliases anywhere a project or milestone name is accepted:
+
+```bash
+linear issues --project V2
+linear issues --milestone MVP
+linear issue create --project V2 --milestone MVP "New feature"
+linear milestones --project V2
+```
+
+Aliases are shown in `linear projects` and `linear milestones` output:
+
+```
+Projects:
+[V2] Version 2.0 Release  started  58%
+
+Milestones:
+[MVP] MVP Milestone [next]
 ```
 
 ## Quick Reference
@@ -89,6 +128,12 @@ linear issue move ISSUE-5 --before ISSUE-1       # Move single issue
 # Labels
 linear labels                   # List all labels
 linear label create "bug" --color "#FF0000"
+
+# Aliases
+linear alias V2 "Version 2.0"        # Create alias for project/milestone
+linear alias --list                  # List all aliases
+linear alias --remove V2             # Remove alias
+# Then use: linear issues --project V2
 
 # Git
 linear branch ISSUE-1            # Create branch: ISSUE-1-issue-title

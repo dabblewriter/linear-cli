@@ -14,6 +14,7 @@ const API_URL = 'https://api.linear.app/graphql';
 let CONFIG_FILE = '';
 let LINEAR_API_KEY = '';
 let TEAM_KEY = '';
+let ALIASES = {};
 
 // Colors (ANSI)
 const colors = {
@@ -43,18 +44,139 @@ function loadConfig() {
   // Load from config file first (highest priority)
   if (CONFIG_FILE) {
     const content = readFileSync(CONFIG_FILE, 'utf-8');
+    let inAliasSection = false;
+
     for (const line of content.split('\n')) {
-      if (!line || line.startsWith('#')) continue;
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+
+      // Check for section header
+      if (trimmed === '[aliases]') {
+        inAliasSection = true;
+        continue;
+      }
+      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+        inAliasSection = false;
+        continue;
+      }
+
       const [key, ...rest] = line.split('=');
       const value = rest.join('=').trim();
-      if (key === 'api_key') LINEAR_API_KEY = value;
-      if (key === 'team') TEAM_KEY = value;
+
+      if (inAliasSection) {
+        // Store aliases with uppercase keys
+        ALIASES[key.trim().toUpperCase()] = value;
+      } else {
+        if (key.trim() === 'api_key') LINEAR_API_KEY = value;
+        if (key.trim() === 'team') TEAM_KEY = value;
+      }
     }
   }
 
   // Fall back to env vars if not set by config file
   if (!LINEAR_API_KEY) LINEAR_API_KEY = process.env.LINEAR_API_KEY || '';
   if (!TEAM_KEY) TEAM_KEY = process.env.LINEAR_TEAM || '';
+}
+
+function resolveAlias(nameOrAlias) {
+  if (!nameOrAlias) return nameOrAlias;
+  return ALIASES[nameOrAlias.toUpperCase()] || nameOrAlias;
+}
+
+function saveAlias(code, name) {
+  if (!CONFIG_FILE) {
+    console.error(colors.red('Error: No config file found. Run "linear login" first.'));
+    process.exit(1);
+  }
+
+  const content = readFileSync(CONFIG_FILE, 'utf-8');
+  const lines = content.split('\n');
+
+  // Find or create [aliases] section
+  let aliasStart = -1;
+  let aliasEnd = -1;
+  let existingAliasLine = -1;
+  const upperCode = code.toUpperCase();
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (trimmed === '[aliases]') {
+      aliasStart = i;
+    } else if (aliasStart !== -1 && aliasEnd === -1) {
+      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+        aliasEnd = i;
+      } else if (trimmed && !trimmed.startsWith('#')) {
+        const [key] = trimmed.split('=');
+        if (key.trim().toUpperCase() === upperCode) {
+          existingAliasLine = i;
+        }
+      }
+    }
+  }
+
+  // If no alias section end found, it goes to EOF
+  if (aliasStart !== -1 && aliasEnd === -1) {
+    aliasEnd = lines.length;
+  }
+
+  const aliasLine = `${upperCode}=${name}`;
+
+  if (existingAliasLine !== -1) {
+    // Update existing alias
+    lines[existingAliasLine] = aliasLine;
+  } else if (aliasStart !== -1) {
+    // Add to existing section
+    lines.splice(aliasStart + 1, 0, aliasLine);
+  } else {
+    // Create new section at end
+    if (lines[lines.length - 1] !== '') {
+      lines.push('');
+    }
+    lines.push('[aliases]');
+    lines.push(aliasLine);
+  }
+
+  writeFileSync(CONFIG_FILE, lines.join('\n'));
+  ALIASES[upperCode] = name;
+}
+
+function removeAlias(code) {
+  if (!CONFIG_FILE) {
+    console.error(colors.red('Error: No config file found.'));
+    process.exit(1);
+  }
+
+  const upperCode = code.toUpperCase();
+  if (!ALIASES[upperCode]) {
+    console.error(colors.red(`Alias not found: ${code}`));
+    process.exit(1);
+  }
+
+  const content = readFileSync(CONFIG_FILE, 'utf-8');
+  const lines = content.split('\n');
+  let inAliasSection = false;
+
+  const newLines = lines.filter(line => {
+    const trimmed = line.trim();
+    if (trimmed === '[aliases]') {
+      inAliasSection = true;
+      return true;
+    }
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      inAliasSection = false;
+      return true;
+    }
+    if (inAliasSection && trimmed && !trimmed.startsWith('#')) {
+      const [key] = trimmed.split('=');
+      if (key.trim().toUpperCase() === upperCode) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  writeFileSync(CONFIG_FILE, newLines.join('\n'));
+  delete ALIASES[upperCode];
 }
 
 function checkAuth() {
@@ -132,16 +254,27 @@ function openBrowser(url) {
   exec(cmd);
 }
 
+// Strip ANSI escape codes for length calculation
+function stripAnsi(str) {
+  return str.replace(/\x1b\[[0-9;]*m/g, '');
+}
+
 function formatTable(rows) {
   if (rows.length === 0) return '';
   const colWidths = [];
   for (const row of rows) {
     row.forEach((cell, i) => {
-      colWidths[i] = Math.max(colWidths[i] || 0, String(cell).length);
+      // Use visible length (without ANSI codes) for width calculation
+      colWidths[i] = Math.max(colWidths[i] || 0, stripAnsi(String(cell)).length);
     });
   }
   return rows.map(row =>
-    row.map((cell, i) => String(cell).padEnd(colWidths[i])).join('  ')
+    row.map((cell, i) => {
+      const str = String(cell);
+      const visibleLen = stripAnsi(str).length;
+      // Pad based on visible length, not string length
+      return str + ' '.repeat(Math.max(0, colWidths[i] - visibleLen));
+    }).join('  ')
   ).join('\n');
 }
 
@@ -273,13 +406,15 @@ async function cmdIssues(args) {
       );
     }
     if (projectFilter) {
+      const resolvedProject = resolveAlias(projectFilter);
       filtered = filtered.filter(i =>
-        i.project?.name?.toLowerCase().includes(projectFilter.toLowerCase())
+        i.project?.name?.toLowerCase().includes(resolvedProject.toLowerCase())
       );
     }
     if (milestoneFilter) {
+      const resolvedMilestone = resolveAlias(milestoneFilter);
       filtered = filtered.filter(i =>
-        i.projectMilestone?.name?.toLowerCase().includes(milestoneFilter.toLowerCase())
+        i.projectMilestone?.name?.toLowerCase().includes(resolvedMilestone.toLowerCase())
       );
     }
     return filtered;
@@ -514,8 +649,8 @@ async function cmdIssueCreate(args) {
 
   const title = opts.title || opts.t || opts._[0];
   const description = opts.description || opts.d || '';
-  const project = opts.project || opts.p;
-  const milestone = opts.milestone;
+  const project = resolveAlias(opts.project || opts.p);
+  const milestone = resolveAlias(opts.milestone);
   const parent = opts.parent;
   const shouldAssign = opts.assign;
   const estimate = (opts.estimate || opts.e || '').toLowerCase();
@@ -687,8 +822,8 @@ async function cmdIssueUpdate(args) {
 
   const blocksIssue = opts.blocks;
   const blockedByIssue = opts['blocked-by'];
-  const projectName = opts.project || opts.p;
-  const milestoneName = opts.milestone;
+  const projectName = resolveAlias(opts.project || opts.p);
+  const milestoneName = resolveAlias(opts.milestone);
   const input = {};
 
   if (opts.title || opts.t) input.title = opts.title || opts.t;
@@ -953,12 +1088,28 @@ async function cmdProjects(args) {
     projects = projects.filter(p => !['completed', 'canceled'].includes(p.state));
   }
 
+  // Find alias for a project (name must start with alias target)
+  const findAliasFor = (name) => {
+    const lowerName = name.toLowerCase();
+    let bestMatch = null;
+    let bestLength = 0;
+    for (const [code, aliasName] of Object.entries(ALIASES)) {
+      const lowerAlias = aliasName.toLowerCase();
+      // Name must start with the alias target, and prefer longer matches
+      if (lowerName.startsWith(lowerAlias) && lowerAlias.length > bestLength) {
+        bestMatch = code;
+        bestLength = lowerAlias.length;
+      }
+    }
+    return bestMatch;
+  };
+
   console.log(colors.bold('Projects:\n'));
-  const rows = projects.map(p => [
-    p.name,
-    p.state,
-    `${Math.floor(p.progress * 100)}%`
-  ]);
+  const rows = projects.map(p => {
+    const alias = findAliasFor(p.name);
+    const nameCol = alias ? `${colors.bold(`[${alias}]`)} ${p.name}` : p.name;
+    return [nameCol, p.state, `${Math.floor(p.progress * 100)}%`];
+  });
   console.log(formatTable(rows));
 }
 
@@ -1129,21 +1280,44 @@ async function cmdMilestones(args) {
     projects = projects.filter(p => !['completed', 'canceled'].includes(p.state));
   }
 
-  // Filter by project name if specified
+  // Filter by project name if specified (resolve alias first)
   if (projectFilter) {
-    projects = projects.filter(p => p.name.toLowerCase().includes(projectFilter.toLowerCase()));
+    const resolvedFilter = resolveAlias(projectFilter);
+    projects = projects.filter(p => p.name.toLowerCase().includes(resolvedFilter.toLowerCase()));
   }
+
+  // Find alias for a name (name must start with alias target)
+  const findAliasFor = (name) => {
+    const lowerName = name.toLowerCase();
+    let bestMatch = null;
+    let bestLength = 0;
+    for (const [code, aliasName] of Object.entries(ALIASES)) {
+      const lowerAlias = aliasName.toLowerCase();
+      // Name must start with the alias target, and prefer longer matches
+      if (lowerName.startsWith(lowerAlias) && lowerAlias.length > bestLength) {
+        bestMatch = code;
+        bestLength = lowerAlias.length;
+      }
+    }
+    return bestMatch;
+  };
 
   console.log(colors.bold('Milestones:\n'));
   for (const project of projects) {
     const milestones = project.projectMilestones?.nodes || [];
     if (milestones.length === 0) continue;
 
-    console.log(colors.bold(project.name));
+    const projectAlias = findAliasFor(project.name);
+    const projectHeader = projectAlias
+      ? `${colors.bold(`[${projectAlias}]`)} ${colors.bold(project.name)}`
+      : colors.bold(project.name);
+    console.log(projectHeader);
     for (const m of milestones) {
+      const milestoneAlias = findAliasFor(m.name);
+      const namePrefix = milestoneAlias ? `${colors.bold(`[${milestoneAlias}]`)} ` : '';
       const date = m.targetDate ? ` (${m.targetDate})` : '';
       const status = m.status !== 'planned' ? ` [${m.status}]` : '';
-      console.log(`  ${m.name}${date}${status}`);
+      console.log(`  ${namePrefix}${m.name}${date}${status}`);
     }
     console.log('');
   }
@@ -1908,6 +2082,77 @@ async function cmdLabelCreate(args) {
     console.error(result.errors?.[0]?.message || JSON.stringify(result));
     process.exit(1);
   }
+}
+
+// ============================================================================
+// ALIASES
+// ============================================================================
+
+async function cmdAlias(args) {
+  const opts = parseArgs(args, {
+    list: 'boolean', l: 'boolean',
+    remove: 'string', r: 'string',
+  });
+
+  const showList = opts.list || opts.l;
+  const removeCode = opts.remove || opts.r;
+  const code = opts._[0];
+  const name = opts._[1];
+
+  // List aliases
+  if (showList || (Object.keys(opts).length === 1 && opts._.length === 0)) {
+    const aliases = Object.entries(ALIASES);
+    if (aliases.length === 0) {
+      console.log('No aliases defined.');
+      console.log('Usage: linear alias CODE "Project or Milestone Name"');
+      return;
+    }
+
+    // Fetch projects to determine type (project vs milestone)
+    const query = `{
+      team(id: "${TEAM_KEY}") {
+        projects(first: 50) {
+          nodes { name }
+        }
+      }
+    }`;
+
+    const result = await gql(query);
+    const projects = result.data?.team?.projects?.nodes || [];
+
+    // Check if alias target matches a project (using partial match)
+    const matchesProject = (target) => {
+      const lowerTarget = target.toLowerCase();
+      return projects.some(p => p.name.toLowerCase().includes(lowerTarget));
+    };
+
+    console.log(colors.bold('Aliases:\n'));
+    for (const [code, target] of aliases) {
+      const isProject = matchesProject(target);
+      const type = isProject ? colors.blue('project') : colors.yellow('milestone');
+      console.log(`  ${colors.bold(code)} -> ${target} (${type})`);
+    }
+    return;
+  }
+
+  // Remove alias
+  if (removeCode) {
+    removeAlias(removeCode);
+    console.log(colors.green(`Removed alias: ${removeCode.toUpperCase()}`));
+    return;
+  }
+
+  // Create/update alias
+  if (!code || !name) {
+    console.error(colors.red('Error: Code and name required'));
+    console.error('Usage: linear alias CODE "Project or Milestone Name"');
+    console.error('       linear alias --list');
+    console.error('       linear alias --remove CODE');
+    process.exit(1);
+  }
+
+  saveAlias(code, name);
+  console.log(colors.green(`Alias set: ${code.toUpperCase()} -> ${name}`));
 }
 
 // ============================================================================
@@ -2816,6 +3061,15 @@ LABELS:
     --description, -d <desc> Label description
     --color, -c <hex>        Label color (e.g., #FF0000)
 
+ALIASES:
+  alias <CODE> "<name>"      Create alias for project/milestone
+  alias --list               List all aliases
+  alias --remove <CODE>      Remove an alias
+
+  Aliases can be used anywhere a project or milestone name is accepted:
+    linear issues --project LWW
+    linear issue create --milestone MVP "New feature"
+
 GIT:
   branch <id>                Create git branch from issue (ISSUE-5-issue-title)
 
@@ -2837,6 +3091,10 @@ CONFIGURATION:
   File format:
     api_key=lin_api_xxx
     team=ISSUE
+
+    [aliases]
+    LWW=Last-Write-Wins Support
+    MVP=MVP Release
 
 EXAMPLES:
   linear roadmap             # See all projects and milestones
@@ -2971,6 +3229,10 @@ async function main() {
         }
         break;
       }
+      case 'alias':
+        checkAuth();
+        await cmdAlias(args.slice(1));
+        break;
       case 'branch':
         checkAuth();
         await cmdBranch(args.slice(1));
