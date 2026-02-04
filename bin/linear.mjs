@@ -1170,11 +1170,12 @@ async function cmdProjects(args) {
 }
 
 async function cmdProjectShow(args) {
-  const projectName = args[0];
-  if (!projectName) {
+  const projectNameArg = args[0];
+  if (!projectNameArg) {
     console.error(colors.red('Error: Project name required'));
     process.exit(1);
   }
+  const projectName = resolveAlias(projectNameArg);
 
   const query = `{
     team(id: "${TEAM_KEY}") {
@@ -1189,7 +1190,7 @@ async function cmdProjectShow(args) {
 
   const result = await gql(query);
   const projects = result.data?.team?.projects?.nodes || [];
-  const project = projects.find(p => p.name.includes(projectName));
+  const project = projects.find(p => p.name.toLowerCase().includes(projectName.toLowerCase()));
 
   if (!project) {
     console.error(colors.red(`Project not found: ${projectName}`));
@@ -1380,13 +1381,14 @@ async function cmdMilestones(args) {
 }
 
 async function cmdMilestoneShow(args) {
-  const milestoneName = args[0];
-  if (!milestoneName) {
+  const milestoneNameArg = args[0];
+  if (!milestoneNameArg) {
     console.error(colors.red('Error: Milestone name required'));
     process.exit(1);
   }
+  const milestoneName = resolveAlias(milestoneNameArg);
 
-  const query = `{
+  const projectsQuery = `{
     team(id: "${TEAM_KEY}") {
       projects(first: 50) {
         nodes {
@@ -1394,7 +1396,6 @@ async function cmdMilestoneShow(args) {
           projectMilestones {
             nodes {
               id name description targetDate status sortOrder
-              issues { nodes { identifier title state { name type } } }
             }
           }
         }
@@ -1402,8 +1403,23 @@ async function cmdMilestoneShow(args) {
     }
   }`;
 
-  const result = await gql(query);
-  const projects = result.data?.team?.projects?.nodes || [];
+  const issuesQuery = `{
+    team(id: "${TEAM_KEY}") {
+      issues(first: 200) {
+        nodes {
+          identifier title state { name type }
+          projectMilestone { id }
+        }
+      }
+    }
+  }`;
+
+  const [projectsResult, issuesResult] = await Promise.all([
+    gql(projectsQuery),
+    gql(issuesQuery)
+  ]);
+  const projects = projectsResult.data?.team?.projects?.nodes || [];
+  const allIssues = issuesResult.data?.team?.issues?.nodes || [];
 
   let milestone = null;
   let projectName = '';
@@ -1429,7 +1445,7 @@ async function cmdMilestoneShow(args) {
   if (milestone.targetDate) console.log(`Target: ${milestone.targetDate}`);
   if (milestone.description) console.log(`\n## Description\n${milestone.description}`);
 
-  const issues = milestone.issues?.nodes || [];
+  const issues = allIssues.filter(i => i.projectMilestone?.id === milestone.id);
   if (issues.length > 0) {
     // Group by state type
     const done = issues.filter(i => i.state.type === 'completed');
