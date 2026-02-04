@@ -320,6 +320,7 @@ async function cmdIssues(args) {
     milestone: 'string',
     state: 'string', s: 'string',
     label: 'string', l: 'string',
+    priority: 'string',
   });
 
   const inProgress = opts['in-progress'];
@@ -332,6 +333,7 @@ async function cmdIssues(args) {
   const milestoneFilter = opts.milestone;
   const stateFilter = opts.state || opts.s;
   const labelFilter = opts.label || opts.l;
+  const priorityFilter = (opts.priority || '').toLowerCase();
 
   // Get current user ID for filtering/sorting
   const viewerResult = await gql('{ viewer { id } }');
@@ -367,17 +369,22 @@ async function cmdIssues(args) {
   // Check if any issues have assignees (to decide whether to show column)
   const hasAssignees = issues.some(i => i.assignee);
 
-  // Sort: assigned to you first, then by priority, then by sortOrder
+  // Sort: assigned to you first, then by priority (urgent first), then by sortOrder
   issues.sort((a, b) => {
     const aIsMine = a.assignee?.id === viewerId;
     const bIsMine = b.assignee?.id === viewerId;
     if (aIsMine && !bIsMine) return -1;
     if (!aIsMine && bIsMine) return 1;
-    // Then by priority (higher = more urgent)
-    if ((b.priority || 0) !== (a.priority || 0)) return (b.priority || 0) - (a.priority || 0);
+    // Then by priority (lower number = more urgent, but 0 means no priority so sort last)
+    const aPri = a.priority || 5; // No priority (0) sorts after Low (4)
+    const bPri = b.priority || 5;
+    if (aPri !== bPri) return aPri - bPri;
     // Then by sortOrder
     return (b.sortOrder || 0) - (a.sortOrder || 0);
   });
+
+  // Check if any issues have priority set
+  const hasPriority = issues.some(i => i.priority > 0);
 
   // Helper to format issue row
   const formatRow = (i) => {
@@ -385,8 +392,12 @@ async function cmdIssues(args) {
       i.identifier,
       i.title,
       i.state.name,
-      i.project?.name || '-'
     ];
+    if (hasPriority) {
+      const pri = PRIORITY_LABELS[i.priority] || '';
+      row.push(pri ? colors.bold(pri) : '-');
+    }
+    row.push(i.project?.name || '-');
     if (hasAssignees) {
       const assignee = i.assignee?.id === viewerId ? 'you' : (i.assignee?.name || '-');
       row.push(assignee);
@@ -416,6 +427,12 @@ async function cmdIssues(args) {
       filtered = filtered.filter(i =>
         i.projectMilestone?.name?.toLowerCase().includes(resolvedMilestone.toLowerCase())
       );
+    }
+    if (priorityFilter) {
+      const targetPriority = PRIORITY_MAP[priorityFilter];
+      if (targetPriority !== undefined) {
+        filtered = filtered.filter(i => i.priority === targetPriority);
+      }
     }
     return filtered;
   };
@@ -632,6 +649,24 @@ const ESTIMATE_MAP = {
   'xl': 5,
 };
 
+// Linear priority values (lower number = higher priority)
+// 0 = No priority, 1 = Urgent, 2 = High, 3 = Medium, 4 = Low
+const PRIORITY_LABELS = {
+  0: '',
+  1: 'Urgent',
+  2: 'High',
+  3: 'Medium',
+  4: 'Low',
+};
+
+const PRIORITY_MAP = {
+  'urgent': 1,
+  'high': 2,
+  'medium': 3,
+  'low': 4,
+  'none': 0,
+};
+
 async function cmdIssueCreate(args) {
   const opts = parseArgs(args, {
     title: 'string', t: 'string',
@@ -642,6 +677,7 @@ async function cmdIssueCreate(args) {
     state: 'string', s: 'string',
     assign: 'boolean',
     estimate: 'string', e: 'string',
+    priority: 'string',
     label: 'string', l: 'string',
     blocks: 'string',
     'blocked-by': 'string',
@@ -650,6 +686,7 @@ async function cmdIssueCreate(args) {
   const title = opts.title || opts.t || opts._[0];
   const description = opts.description || opts.d || '';
   const project = resolveAlias(opts.project || opts.p);
+  const priority = (opts.priority || '').toLowerCase();
   const milestone = resolveAlias(opts.milestone);
   const parent = opts.parent;
   const shouldAssign = opts.assign;
@@ -660,13 +697,19 @@ async function cmdIssueCreate(args) {
 
   if (!title) {
     console.error(colors.red('Error: Title is required'));
-    console.error('Usage: linear issue create --title "Issue title" [--project "..."] [--milestone "..."] [--parent ISSUE-X] [--estimate M] [--assign] [--label bug] [--blocks ISSUE-X] [--blocked-by ISSUE-X]');
+    console.error('Usage: linear issue create --title "Issue title" [--project "..."] [--milestone "..."] [--parent ISSUE-X] [--estimate M] [--priority urgent] [--assign] [--label bug] [--blocks ISSUE-X] [--blocked-by ISSUE-X]');
     process.exit(1);
   }
 
   // Validate estimate
   if (estimate && !ESTIMATE_MAP.hasOwnProperty(estimate)) {
     console.error(colors.red(`Error: Invalid estimate "${estimate}". Use: XS, S, M, L, or XL`));
+    process.exit(1);
+  }
+
+  // Validate priority
+  if (priority && !PRIORITY_MAP.hasOwnProperty(priority)) {
+    console.error(colors.red(`Error: Invalid priority "${priority}". Use: urgent, high, medium, low, or none`));
     process.exit(1);
   }
 
@@ -761,6 +804,7 @@ async function cmdIssueCreate(args) {
   if (parent) input.parentId = parent;
   if (assigneeId) input.assigneeId = assigneeId;
   if (estimate) input.estimate = ESTIMATE_MAP[estimate];
+  if (priority) input.priority = PRIORITY_MAP[priority];
   if (labelIds.length > 0) input.labelIds = labelIds;
 
   const result = await gql(mutation, { input });
@@ -768,7 +812,8 @@ async function cmdIssueCreate(args) {
   if (result.data?.issueCreate?.success) {
     const issue = result.data.issueCreate.issue;
     const estLabel = estimate ? ` [${estimate.toUpperCase()}]` : '';
-    console.log(colors.green(`Created: ${issue.identifier}${estLabel}`));
+    const priLabel = priority && priority !== 'none' ? ` [${priority.charAt(0).toUpperCase() + priority.slice(1)}]` : '';
+    console.log(colors.green(`Created: ${issue.identifier}${estLabel}${priLabel}`));
     console.log(issue.url);
 
     // Create blocking relations if specified
@@ -815,6 +860,7 @@ async function cmdIssueUpdate(args) {
     state: 'string', s: 'string',
     project: 'string', p: 'string',
     milestone: 'string',
+    priority: 'string',
     append: 'string', a: 'string',
     blocks: 'string',
     'blocked-by': 'string',
@@ -824,9 +870,19 @@ async function cmdIssueUpdate(args) {
   const blockedByIssue = opts['blocked-by'];
   const projectName = resolveAlias(opts.project || opts.p);
   const milestoneName = resolveAlias(opts.milestone);
+  const priorityName = (opts.priority || '').toLowerCase();
   const input = {};
 
   if (opts.title || opts.t) input.title = opts.title || opts.t;
+
+  // Handle priority
+  if (priorityName) {
+    if (!PRIORITY_MAP.hasOwnProperty(priorityName)) {
+      console.error(colors.red(`Error: Invalid priority "${priorityName}". Use: urgent, high, medium, low, or none`));
+      process.exit(1);
+    }
+    input.priority = PRIORITY_MAP[priorityName];
+  }
 
   // Handle append
   if (opts.append || opts.a) {
@@ -2993,6 +3049,7 @@ ISSUES:
     --milestone <name>       Filter by milestone
     --state, -s <state>      Filter by state
     --label, -l <name>       Filter by label
+    --priority <level>       Filter by priority (urgent/high/medium/low/none)
   issues reorder <ids...>    Reorder issues by listing IDs in order
 
   issue show <id>            Show issue details with parent context
@@ -3005,6 +3062,7 @@ ISSUES:
     --parent <id>            Parent issue (for sub-issues)
     --assign                 Assign to yourself
     --estimate, -e <size>    Estimate: XS, S, M, L, XL
+    --priority <level>       Priority: urgent, high, medium, low, none
     --label, -l <name>       Add label
     --blocks <id>            This issue blocks another
     --blocked-by <id>        This issue is blocked by another
@@ -3014,6 +3072,7 @@ ISSUES:
     --state, -s <state>      New state
     --project, -p <name>     Move to project
     --milestone <name>       Move to milestone
+    --priority <level>       Set priority (urgent/high/medium/low/none)
     --append, -a <text>      Append to description
     --blocks <id>            Add blocking relation
     --blocked-by <id>        Add blocked-by relation

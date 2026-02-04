@@ -92,13 +92,16 @@ linear issues --mine            # Only your assigned issues
 linear issues --project "Name"  # Issues in a project
 linear issues --milestone "M1"  # Issues in a milestone
 linear issues --label bug       # Filter by label
+linear issues --priority urgent # Filter by priority (urgent/high/medium/low/none)
 # Flags can be combined: linear issues --in-progress --mine
 linear issue show ISSUE-1        # Full details with parent context
 linear issue start ISSUE-1       # Assign to you + set In Progress
 linear issue create --title "Fix bug" --project "Phase 1" --assign --estimate M
+linear issue create --title "Urgent bug" --priority urgent --assign
 linear issue create --title "Task" --milestone "Beta" --estimate S
 linear issue create --title "Blocked task" --blocked-by ISSUE-1
 linear issue update ISSUE-1 --state "In Progress"
+linear issue update ISSUE-1 --priority high   # Set priority
 linear issue update ISSUE-1 --milestone "Beta"
 linear issue update ISSUE-1 --append "Notes..."
 linear issue update ISSUE-1 --blocks ISSUE-2  # Add blocking relation
