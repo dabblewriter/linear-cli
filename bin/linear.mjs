@@ -2722,7 +2722,6 @@ async function cmdStandup(args) {
 
   const skipGitHub = opts['no-github'];
   const yesterday = getYesterdayDate();
-  const today = getTodayDate();
 
   // Get current user
   const viewerResult = await gql('{ viewer { id name } }');
@@ -2815,93 +2814,88 @@ async function cmdStandup(args) {
     }
   }
 
-  // GitHub activity
+  // GitHub activity (cross-repo)
   if (!skipGitHub) {
     console.log('');
     console.log(colors.gray(`─────────────────────────────────────────\n`));
     console.log(colors.bold('GitHub Activity (yesterday):'));
 
+    let hasActivity = false;
+    let ghAvailable = true;
+
+    // Get commits across all repos
     try {
-      // Get commits from yesterday
-      const sinceDate = `${yesterday}T00:00:00`;
-      const untilDate = `${today}T00:00:00`;
+      const commitsJson = execSync(
+        `gh search commits --author=@me --committer-date=${yesterday} --json sha,commit,repository --limit 50`,
+        { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+      );
+      const commits = JSON.parse(commitsJson);
 
-      // Try to get repo info
-      let repoOwner, repoName;
-      try {
-        const remoteUrl = execSync('git remote get-url origin', { encoding: 'utf-8' }).trim();
-        const match = remoteUrl.match(/github\.com[:/]([^/]+)\/([^/.]+)/);
-        if (match) {
-          repoOwner = match[1];
-          repoName = match[2];
-        }
-      } catch (err) {
-        // Not in a git repo or no origin
-      }
-
-      if (repoOwner && repoName) {
-        // Get git user name for author matching (may differ from Linear display name)
-        let gitUserName;
-        try {
-          gitUserName = execSync('git config user.name', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-        } catch (err) {
-          gitUserName = viewer.name; // Fall back to Linear name
+      if (commits.length > 0) {
+        hasActivity = true;
+        const byRepo = {};
+        for (const c of commits) {
+          const repo = c.repository?.fullName || 'unknown';
+          if (!byRepo[repo]) byRepo[repo] = [];
+          const msg = c.commit?.message?.split('\n')[0] || c.sha.slice(0, 7);
+          byRepo[repo].push(`${c.sha.slice(0, 7)} ${msg}`);
         }
 
-        // Get commits using git log (more reliable than gh for commits)
-        try {
-          const gitLog = execSync(
-            `git log --since="${sinceDate}" --until="${untilDate}" --author="${gitUserName}" --oneline`,
-            { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
-          ).trim();
-
-          if (gitLog) {
-            const commits = gitLog.split('\n').filter(Boolean);
-            console.log(`\n  Commits (${commits.length}):`);
-            for (const commit of commits.slice(0, 10)) {
-              console.log(`    ${commit}`);
-            }
-            if (commits.length > 10) {
-              console.log(colors.gray(`    ... and ${commits.length - 10} more`));
-            }
+        console.log(`\n  Commits (${commits.length}):`);
+        for (const [repo, repoCommits] of Object.entries(byRepo)) {
+          console.log(`    ${colors.bold(repo)} (${repoCommits.length}):`);
+          for (const commit of repoCommits) {
+            console.log(`      ${commit}`);
           }
-        } catch (err) {
-          // No commits or git error
         }
-
-        // Get PRs using gh
-        try {
-          const prsJson = execSync(
-            `gh pr list --author @me --state all --json number,title,state,mergedAt,createdAt --limit 20`,
-            { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
-          );
-          const prs = JSON.parse(prsJson);
-
-          // Filter to PRs created or merged yesterday
-          const relevantPrs = prs.filter(pr => {
-            const createdDate = pr.createdAt?.split('T')[0];
-            const mergedDate = pr.mergedAt?.split('T')[0];
-            return createdDate === yesterday || mergedDate === yesterday;
-          });
-
-          if (relevantPrs.length > 0) {
-            console.log(`\n  Pull Requests:`);
-            for (const pr of relevantPrs) {
-              const status = pr.state === 'MERGED' ? colors.green('merged') :
-                            pr.state === 'OPEN' ? colors.yellow('open') :
-                            colors.gray(pr.state.toLowerCase());
-              console.log(`    #${pr.number} ${pr.title} [${status}]`);
-            }
-          }
-        } catch (err) {
-          // gh not available or error
-          console.log(colors.gray('  (gh CLI not available or not authenticated)'));
-        }
-      } else {
-        console.log(colors.gray('  (not in a GitHub repository)'));
       }
     } catch (err) {
-      console.log(colors.gray(`  Error fetching GitHub data: ${err.message}`));
+      ghAvailable = false;
+      console.log(colors.gray('  (gh CLI not available - install gh for GitHub activity)'));
+    }
+
+    // Get PRs across all repos
+    if (ghAvailable) {
+      try {
+        const mergedJson = execSync(
+          `gh search prs --author=@me --merged-at=${yesterday} --json number,title,repository --limit 20`,
+          { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+        );
+        const mergedPrs = JSON.parse(mergedJson).map(pr => ({ ...pr, prStatus: 'merged' }));
+
+        const createdJson = execSync(
+          `gh search prs --author=@me --created=${yesterday} --state=open --json number,title,repository --limit 20`,
+          { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+        );
+        const createdPrs = JSON.parse(createdJson).map(pr => ({ ...pr, prStatus: 'open' }));
+
+        // Deduplicate (a PR created and merged same day appears in both)
+        const seen = new Set();
+        const allPrs = [];
+        for (const pr of [...mergedPrs, ...createdPrs]) {
+          const key = `${pr.repository?.fullName}#${pr.number}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            allPrs.push(pr);
+          }
+        }
+
+        if (allPrs.length > 0) {
+          hasActivity = true;
+          console.log(`\n  Pull Requests:`);
+          for (const pr of allPrs) {
+            const repo = pr.repository?.name || '';
+            const status = pr.prStatus === 'merged' ? colors.green('merged') : colors.yellow('open');
+            console.log(`    ${colors.gray(repo + '#')}${pr.number} ${pr.title} [${status}]`);
+          }
+        }
+      } catch (err) {
+        // gh search error
+      }
+    }
+
+    if (!hasActivity && ghAvailable) {
+      console.log(colors.gray('  No GitHub activity yesterday'));
     }
   }
 

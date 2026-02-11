@@ -17,8 +17,8 @@ Run `linear standup` to get:
 - Issues currently in progress
 - Issues that are blocked
 
-**From GitHub (if in a repo):**
-- Commits you made yesterday
+**From GitHub (across all repos):**
+- Commits you made yesterday, grouped by repo
 - PRs you opened or merged yesterday
 
 ## After Running
@@ -48,8 +48,9 @@ Here's your standup summary:
 **Blocked:**
 ⊘ ISSUE-12: Waiting on API credentials
 
-**GitHub:**
-- 4 commits on beautiful-tech
+**GitHub (all repos):**
+- dabble/beautiful-tech: 4 commits
+- dabble/linear-cli: 2 commits
 - PR #42 merged: ISSUE-5: Add caching layer
 
 [Presents options above]
@@ -59,5 +60,5 @@ Here's your standup summary:
 
 - The `linear standup` command handles all the data fetching
 - GitHub info requires the `gh` CLI to be installed and authenticated
-- If not in a git repo, GitHub section will be skipped
+- Shows activity across all GitHub repos, not just the current one
 - Use `--no-github` flag to skip GitHub even if available
