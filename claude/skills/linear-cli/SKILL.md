@@ -104,6 +104,7 @@ linear issue update ISSUE-1 --state "In Progress"
 linear issue update ISSUE-1 --priority high   # Set priority
 linear issue update ISSUE-1 --milestone "Beta"
 linear issue update ISSUE-1 --append "Notes..."
+linear issue update ISSUE-1 --check "validation" # Check off a todo item
 linear issue update ISSUE-1 --blocks ISSUE-2  # Add blocking relation
 linear issue close ISSUE-1
 linear issue comment ISSUE-1 "Comment text"
@@ -221,6 +222,26 @@ linear issue create --title "Step 3: Add tests" --parent ISSUE-5 --estimate S
 # Start working on the first sub-issue
 linear issue start ISSUE-6
 ```
+
+### Checklists vs. sub-issues
+Use description checklists for lightweight steps within a single issue. Use sub-issues when items need their own status, assignee, or estimate.
+
+```bash
+# Checklist — quick implementation steps, a punch list, acceptance criteria
+linear issue update ISSUE-5 --append "## TODO\n- [ ] Add validation\n- [ ] Update tests\n- [ ] Check edge cases"
+
+# Check off completed items (fuzzy matches the item text)
+linear issue update ISSUE-5 --check "validation"
+linear issue update ISSUE-5 --check "tests"
+
+# Uncheck if needed
+linear issue update ISSUE-5 --uncheck "validation"
+
+# Sub-issues — substantial, independently trackable work
+linear issue create --title "Add login endpoint" --parent ISSUE-5 --estimate S
+```
+
+Prefer checklists when the items are small and don't need independent tracking. Prefer sub-issues when you'd want to assign, estimate, or block on them individually. Use `--check` to mark items complete as you finish them.
 
 ### Completing work
 After finishing implementation, ask the developer if they want to close the issue:

@@ -862,6 +862,8 @@ async function cmdIssueUpdate(args) {
     milestone: 'string',
     priority: 'string',
     append: 'string', a: 'string',
+    check: 'string',
+    uncheck: 'string',
     blocks: 'string',
     'blocked-by': 'string',
   });
@@ -891,6 +893,70 @@ async function cmdIssueUpdate(args) {
     input.description = current + '\n\n' + (opts.append || opts.a);
   } else if (opts.description || opts.d) {
     input.description = opts.description || opts.d;
+  }
+
+  // Handle check/uncheck
+  const checkText = opts.check;
+  const uncheckText = opts.uncheck;
+  if (checkText || uncheckText) {
+    const isCheck = !!checkText;
+    const query = checkText || uncheckText;
+    const fromPattern = isCheck ? /- \[ \] / : /- \[x\] /i;
+    const toMark = isCheck ? '- [x] ' : '- [ ] ';
+    const verb = isCheck ? 'Checked' : 'Unchecked';
+
+    // Fetch current description if we haven't already
+    let desc = input.description;
+    if (!desc) {
+      const currentResult = await gql(`{ issue(id: "${issueId}") { description } }`);
+      desc = currentResult.data?.issue?.description || '';
+    }
+
+    const lines = desc.split('\n');
+    const checkboxLines = lines
+      .map((line, i) => ({ line, index: i }))
+      .filter(({ line }) => fromPattern.test(line));
+
+    if (checkboxLines.length === 0) {
+      console.error(colors.red(`Error: No ${isCheck ? 'unchecked' : 'checked'} items found in description`));
+      process.exit(1);
+    }
+
+    // Find best match: score each checkbox line by similarity to query
+    const queryLower = query.toLowerCase();
+    let bestMatch = null;
+    let bestScore = 0;
+
+    for (const { line, index } of checkboxLines) {
+      const text = line.replace(/- \[[ x]\] /i, '').toLowerCase();
+      // Exact match
+      if (text === queryLower) { bestMatch = { line, index }; bestScore = Infinity; break; }
+      // Substring match
+      if (text.includes(queryLower) || queryLower.includes(text)) {
+        const score = queryLower.length / Math.max(text.length, queryLower.length);
+        if (score > bestScore) { bestScore = score; bestMatch = { line, index }; }
+      } else {
+        // Word overlap scoring
+        const queryWords = queryLower.split(/\s+/);
+        const textWords = text.split(/\s+/);
+        const overlap = queryWords.filter(w => textWords.some(tw => tw.includes(w) || w.includes(tw))).length;
+        const score = overlap / Math.max(queryWords.length, textWords.length);
+        if (score > bestScore) { bestScore = score; bestMatch = { line, index }; }
+      }
+    }
+
+    if (!bestMatch || bestScore < 0.3) {
+      console.error(colors.red(`Error: No checkbox matching "${query}"`));
+      console.error('Available items:');
+      checkboxLines.forEach(({ line }) => console.error('  ' + line.trim()));
+      process.exit(1);
+    }
+
+    lines[bestMatch.index] = bestMatch.line.replace(fromPattern, toMark);
+    input.description = lines.join('\n');
+
+    const itemText = bestMatch.line.replace(/- \[[ x]\] /i, '').trim();
+    console.log(colors.green(`${verb}: ${itemText}`));
   }
 
   // Handle state
@@ -3090,6 +3156,8 @@ ISSUES:
     --milestone <name>       Move to milestone
     --priority <level>       Set priority (urgent/high/medium/low/none)
     --append, -a <text>      Append to description
+    --check <text>           Check a checkbox item (fuzzy match)
+    --uncheck <text>         Uncheck a checkbox item (fuzzy match)
     --blocks <id>            Add blocking relation
     --blocked-by <id>        Add blocked-by relation
   issue close <id>           Mark issue as done
