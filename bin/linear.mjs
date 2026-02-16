@@ -12,9 +12,12 @@ import { exec, execSync } from 'child_process';
 
 const API_URL = 'https://api.linear.app/graphql';
 let CONFIG_FILE = '';
+let AUTH_CONFIG_FILE = '';
 let LINEAR_API_KEY = '';
 let TEAM_KEY = '';
 let ALIASES = {};
+let DEFAULT_PROJECT = '';
+let DEFAULT_MILESTONE = '';
 
 // Colors (ANSI)
 const colors = {
@@ -34,16 +37,16 @@ function loadConfig() {
   const localPath = join(process.cwd(), '.linear');
   const globalPath = join(homedir(), '.linear');
 
-  // Priority: ./.linear > ~/.linear > env vars
-  if (existsSync(localPath)) {
-    CONFIG_FILE = localPath;
-  } else if (existsSync(globalPath)) {
-    CONFIG_FILE = globalPath;
-  }
+  // Layer: read global first, then local on top (local values override global)
+  const filesToLoad = [];
+  if (existsSync(globalPath)) filesToLoad.push(globalPath);
+  if (existsSync(localPath)) filesToLoad.push(localPath);
 
-  // Load from config file first (highest priority)
-  if (CONFIG_FILE) {
-    const content = readFileSync(CONFIG_FILE, 'utf-8');
+  // CONFIG_FILE is used for local/project writes (open/close) — always local
+  CONFIG_FILE = localPath;
+
+  for (const filePath of filesToLoad) {
+    const content = readFileSync(filePath, 'utf-8');
     let inAliasSection = false;
 
     for (const line of content.split('\n')) {
@@ -64,11 +67,17 @@ function loadConfig() {
       const value = rest.join('=').trim();
 
       if (inAliasSection) {
-        // Store aliases with uppercase keys
+        // Store aliases with uppercase keys (later files override)
         ALIASES[key.trim().toUpperCase()] = value;
       } else {
-        if (key.trim() === 'api_key') LINEAR_API_KEY = value;
-        if (key.trim() === 'team') TEAM_KEY = value;
+        const k = key.trim();
+        if (k === 'api_key') {
+          LINEAR_API_KEY = value;
+          AUTH_CONFIG_FILE = filePath;
+        }
+        if (k === 'team') TEAM_KEY = value;
+        if (k === 'project') DEFAULT_PROJECT = value;
+        if (k === 'milestone') DEFAULT_MILESTONE = value;
       }
     }
   }
@@ -76,6 +85,8 @@ function loadConfig() {
   // Fall back to env vars if not set by config file
   if (!LINEAR_API_KEY) LINEAR_API_KEY = process.env.LINEAR_API_KEY || '';
   if (!TEAM_KEY) TEAM_KEY = process.env.LINEAR_TEAM || '';
+  if (!DEFAULT_PROJECT) DEFAULT_PROJECT = process.env.LINEAR_PROJECT || '';
+  if (!DEFAULT_MILESTONE) DEFAULT_MILESTONE = process.env.LINEAR_MILESTONE || '';
 }
 
 function resolveAlias(nameOrAlias) {
@@ -83,13 +94,39 @@ function resolveAlias(nameOrAlias) {
   return ALIASES[nameOrAlias.toUpperCase()] || nameOrAlias;
 }
 
-function saveAlias(code, name) {
-  if (!CONFIG_FILE) {
-    console.error(colors.red('Error: No config file found. Run "linear login" first.'));
+async function ensureAuthConfig() {
+  if (AUTH_CONFIG_FILE) return;
+
+  console.log('No config file found. Where should aliases be saved?\n');
+  console.log('  1. This project only (./.linear)');
+  console.log('  2. Global, for all projects (~/.linear)');
+  console.log('');
+
+  const choice = await prompt('Enter number: ');
+  if (choice !== '1' && choice !== '2') {
+    console.error(colors.red('Error: Please enter 1 or 2'));
     process.exit(1);
   }
 
-  const content = readFileSync(CONFIG_FILE, 'utf-8');
+  if (choice === '1') {
+    AUTH_CONFIG_FILE = join(process.cwd(), '.linear');
+    if (!existsSync(AUTH_CONFIG_FILE)) {
+      writeFileSync(AUTH_CONFIG_FILE, '');
+      ensureGitignore();
+    }
+  } else {
+    AUTH_CONFIG_FILE = join(homedir(), '.linear');
+    if (!existsSync(AUTH_CONFIG_FILE)) {
+      writeFileSync(AUTH_CONFIG_FILE, '');
+    }
+  }
+  console.log('');
+}
+
+async function saveAlias(code, name) {
+  await ensureAuthConfig();
+
+  const content = readFileSync(AUTH_CONFIG_FILE, 'utf-8');
   const lines = content.split('\n');
 
   // Find or create [aliases] section
@@ -136,12 +173,12 @@ function saveAlias(code, name) {
     lines.push(aliasLine);
   }
 
-  writeFileSync(CONFIG_FILE, lines.join('\n'));
+  writeFileSync(AUTH_CONFIG_FILE, lines.join('\n'));
   ALIASES[upperCode] = name;
 }
 
-function removeAlias(code) {
-  if (!CONFIG_FILE) {
+async function removeAlias(code) {
+  if (!AUTH_CONFIG_FILE) {
     console.error(colors.red('Error: No config file found.'));
     process.exit(1);
   }
@@ -152,7 +189,7 @@ function removeAlias(code) {
     process.exit(1);
   }
 
-  const content = readFileSync(CONFIG_FILE, 'utf-8');
+  const content = readFileSync(AUTH_CONFIG_FILE, 'utf-8');
   const lines = content.split('\n');
   let inAliasSection = false;
 
@@ -175,8 +212,98 @@ function removeAlias(code) {
     return true;
   });
 
-  writeFileSync(CONFIG_FILE, newLines.join('\n'));
+  writeFileSync(AUTH_CONFIG_FILE, newLines.join('\n'));
   delete ALIASES[upperCode];
+}
+
+function ensureLocalConfig() {
+  // CONFIG_FILE always points to local ./.linear
+  if (existsSync(CONFIG_FILE)) return;
+
+  // Create local config file
+  writeFileSync(CONFIG_FILE, '');
+
+  // Add .linear to .gitignore
+  ensureGitignore();
+}
+
+function ensureGitignore() {
+  const gitignorePath = join(process.cwd(), '.gitignore');
+  try {
+    let gitignore = '';
+    if (existsSync(gitignorePath)) {
+      gitignore = readFileSync(gitignorePath, 'utf-8');
+    }
+
+    const lines = gitignore.split('\n').map(l => l.trim());
+    if (!lines.includes('.linear')) {
+      const newline = gitignore.endsWith('\n') || gitignore === '' ? '' : '\n';
+      writeFileSync(gitignorePath, gitignore + newline + '.linear\n');
+      console.log(colors.green(`Added .linear to .gitignore`));
+    }
+  } catch (err) {
+    // Silently ignore if we can't update .gitignore
+  }
+}
+
+function writeConfigValue(key, value) {
+  ensureLocalConfig();
+
+  const content = readFileSync(CONFIG_FILE, 'utf-8');
+  const lines = content.split('\n');
+  let found = false;
+  let insertBefore = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    // Stop before section headers
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      if (insertBefore === -1) insertBefore = i;
+      break;
+    }
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const [k] = trimmed.split('=');
+    if (k.trim() === key) {
+      lines[i] = `${key}=${value}`;
+      found = true;
+      break;
+    }
+  }
+
+  if (!found) {
+    const newLine = `${key}=${value}`;
+    if (insertBefore !== -1) {
+      lines.splice(insertBefore, 0, newLine);
+    } else {
+      lines.push(newLine);
+    }
+  }
+
+  writeFileSync(CONFIG_FILE, lines.join('\n'));
+}
+
+function removeConfigValue(key) {
+  if (!existsSync(CONFIG_FILE)) return null;
+
+  const content = readFileSync(CONFIG_FILE, 'utf-8');
+  const lines = content.split('\n');
+  let removed = null;
+
+  const newLines = lines.filter(line => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('[')) return true;
+    const [k, ...rest] = trimmed.split('=');
+    if (k.trim() === key) {
+      removed = rest.join('=').trim();
+      return false;
+    }
+    return true;
+  });
+
+  if (removed !== null) {
+    writeFileSync(CONFIG_FILE, newLines.join('\n'));
+  }
+  return removed;
 }
 
 function checkAuth() {
@@ -325,6 +452,8 @@ async function cmdIssues(args) {
     status: 'array', s: 'array',
     project: 'string', p: 'string',
     milestone: 'string',
+    'no-project': 'boolean',
+    'no-milestone': 'boolean',
     label: 'array', l: 'array',
     priority: 'string',
   });
@@ -334,8 +463,10 @@ async function cmdIssues(args) {
   const openOnly = opts.open || opts.o;
   const mineOnly = opts.mine || opts.m;
   const statusFilter = opts.status || opts.s || [];
-  const projectFilter = opts.project || opts.p;
-  const milestoneFilter = opts.milestone;
+  const noProject = opts['no-project'];
+  const noMilestone = opts['no-milestone'];
+  const projectFilter = noProject ? '' : (opts.project || opts.p || DEFAULT_PROJECT);
+  const milestoneFilter = noMilestone ? '' : (opts.milestone || DEFAULT_MILESTONE);
   const labelFilters = opts.label || opts.l || [];
   const priorityFilter = (opts.priority || '').toLowerCase();
 
@@ -408,6 +539,15 @@ async function cmdIssues(args) {
   // Check if any issues have priority set
   const hasPriority = issues.some(i => i.priority > 0);
 
+  // When filtering to a single project, drop the project column
+  const showProjectCol = !projectFilter;
+
+  // Build context string for header (e.g. "[My Project > Sprint 3]")
+  const contextParts = [];
+  if (projectFilter) contextParts.push(resolveAlias(projectFilter));
+  if (milestoneFilter) contextParts.push(resolveAlias(milestoneFilter));
+  const contextStr = contextParts.length > 0 ? ` [${contextParts.join(' > ')}]` : '';
+
   // Helper to format issue row
   const formatRow = (i) => {
     const row = [
@@ -419,7 +559,9 @@ async function cmdIssues(args) {
       const pri = PRIORITY_LABELS[i.priority] || '';
       row.push(pri ? colors.bold(pri) : '-');
     }
-    row.push(i.project?.name || '-');
+    if (showProjectCol) {
+      row.push(i.project?.name || '-');
+    }
     if (hasAssignees) {
       const assignee = i.assignee?.id === viewerId ? 'you' : (i.assignee?.name || '-');
       row.push(assignee);
@@ -488,7 +630,7 @@ async function cmdIssues(args) {
 
     filtered = applyFilters(filtered);
 
-    console.log(colors.bold('Unblocked Issues:\n'));
+    console.log(colors.bold(`Unblocked Issues${contextStr}:\n`));
     console.log(formatTable(filtered.map(formatRow)));
   } else if (allStates) {
     let filtered = issues;
@@ -497,7 +639,7 @@ async function cmdIssues(args) {
     }
     filtered = applyFilters(filtered);
 
-    console.log(colors.bold('All Issues:\n'));
+    console.log(colors.bold(`All Issues${contextStr}:\n`));
     console.log(formatTable(filtered.map(formatRow)));
   } else if (openOnly) {
     let filtered = issues.filter(i =>
@@ -509,21 +651,21 @@ async function cmdIssues(args) {
 
     filtered = applyFilters(filtered);
 
-    console.log(colors.bold('Open Issues:\n'));
+    console.log(colors.bold(`Open Issues${contextStr}:\n`));
     console.log(formatTable(filtered.map(formatRow)));
   } else if (resolvedStatusTypes.length > 0) {
     let filtered = filterByStatus(issues, resolvedStatusTypes);
     filtered = applyFilters(filtered);
 
     const label = statusFilter.join(' + ');
-    console.log(colors.bold(`Issues (${label}):\n`));
+    console.log(colors.bold(`Issues${contextStr} (${label}):\n`));
     console.log(formatTable(filtered.map(formatRow)));
   } else {
     // Default: show backlog + todo
     let filtered = issues.filter(i => i.state.type === 'backlog' || i.state.type === 'unstarted');
     filtered = applyFilters(filtered);
 
-    console.log(colors.bold('Issues (backlog + todo):\n'));
+    console.log(colors.bold(`Issues${contextStr} (backlog + todo):\n`));
     console.log(formatTable(filtered.map(formatRow)));
   }
 }
@@ -714,9 +856,9 @@ async function cmdIssueCreate(args) {
 
   const title = opts.title || opts.t || opts._[0];
   const description = opts.description || opts.d || '';
-  const project = resolveAlias(opts.project || opts.p);
+  const project = resolveAlias(opts.project || opts.p) || DEFAULT_PROJECT;
   const priority = (opts.priority || '').toLowerCase();
-  const milestone = resolveAlias(opts.milestone);
+  const milestone = resolveAlias(opts.milestone) || DEFAULT_MILESTONE;
   const parent = opts.parent;
   const shouldAssign = opts.assign;
   const estimate = (opts.estimate || opts.e || '').toLowerCase();
@@ -2350,7 +2492,7 @@ async function cmdAlias(args) {
 
   // Remove alias
   if (removeCode) {
-    removeAlias(removeCode);
+    await removeAlias(removeCode);
     console.log(colors.green(`Removed alias: ${removeCode.toUpperCase()}`));
     return;
   }
@@ -2364,7 +2506,7 @@ async function cmdAlias(args) {
     process.exit(1);
   }
 
-  saveAlias(code, name);
+  await saveAlias(code, name);
   console.log(colors.green(`Alias set: ${code.toUpperCase()} -> ${name}`));
 }
 
@@ -3093,25 +3235,7 @@ team=${selectedKey}
 
   // Add .linear to .gitignore if saving locally
   if (!saveGlobal) {
-    const gitignorePath = join(process.cwd(), '.gitignore');
-    try {
-      let gitignore = '';
-      if (existsSync(gitignorePath)) {
-        gitignore = readFileSync(gitignorePath, 'utf-8');
-      }
-
-      // Check if .linear is already in .gitignore
-      const lines = gitignore.split('\n').map(l => l.trim());
-      if (!lines.includes('.linear')) {
-        // Add .linear to .gitignore
-        const newline = gitignore.endsWith('\n') || gitignore === '' ? '' : '\n';
-        const content = gitignore + newline + '.linear\n';
-        writeFileSync(gitignorePath, content);
-        console.log(colors.green(`Added .linear to .gitignore`));
-      }
-    } catch (err) {
-      // Silently ignore if we can't update .gitignore
-    }
+    ensureGitignore();
 
     // Add .linear to .worktreeinclude for worktree support
     const worktreeIncludePath = join(process.cwd(), '.worktreeinclude');
@@ -3195,8 +3319,10 @@ ISSUES:
     --status, -s <name>      Filter by status (repeatable: --status todo --status backlog)
     --all, -a                Show all states (including completed)
     --mine, -m               Show only issues assigned to you
-    --project, -p <name>     Filter by project
-    --milestone <name>       Filter by milestone
+    --project, -p <name>     Filter by project (default: open project)
+    --milestone <name>       Filter by milestone (default: open milestone)
+    --no-project             Bypass default project filter
+    --no-milestone           Bypass default milestone filter
     --label, -l <name>       Filter by label (repeatable)
     --priority <level>       Filter by priority (urgent/high/medium/low/none)
   issues reorder <ids...>    Reorder issues by listing IDs in order
@@ -3247,6 +3373,8 @@ PROJECTS:
     --name, -n <name>        Project name (required)
     --description, -d <desc> Project description
   project complete <name>    Mark project as completed
+  project open <name>        Set default project for issues/create
+  project close              Clear default project
   project move <name>        Move project in sort order
     --before <name>          Move before this project
     --after <name>           Move after this project
@@ -3264,6 +3392,8 @@ MILESTONES:
     --project, -p <name>     Project (required)
     --description, -d <desc> Milestone description
     --target-date <date>     Target date (YYYY-MM-DD)
+  milestone open <name>      Set default milestone for issues/create
+  milestone close            Clear default milestone
   milestone move <name>      Move milestone in sort order
     --before <name>          Move before this milestone
     --after <name>           Move after this milestone
@@ -3300,17 +3430,27 @@ WORKFLOW:
     lnext() { eval "$(linear next "$@")"; }
 
 CONFIGURATION:
-  Config is loaded from ./.linear first, then ~/.linear, then env vars.
+  Config is layered: ~/.linear (global) then ./.linear (local override).
+  Local values override global; unset local values inherit from global.
+  Env vars (LINEAR_API_KEY, LINEAR_TEAM, LINEAR_PROJECT, LINEAR_MILESTONE)
+  are used as fallbacks when not set in any config file.
 
   File format:
     api_key=lin_api_xxx
     team=ISSUE
+    project=My Project
+    milestone=Sprint 3
 
     [aliases]
     LWW=Last-Write-Wins Support
     MVP=MVP Release
 
 EXAMPLES:
+  linear project open "Phase 1"    # Set default project context
+  linear milestone open "Sprint 3" # Set default milestone context
+  linear issues                    # Filtered to Phase 1 > Sprint 3
+  linear issues --no-project       # Bypass default, show all projects
+  linear project close             # Clear default project
   linear roadmap             # See all projects and milestones
   linear issues --unblocked  # Find workable issues
   linear issues --project "Phase 1"  # Issues in a project
@@ -3393,6 +3533,29 @@ async function main() {
           case 'create': await cmdProjectCreate(subargs); break;
           case 'complete': await cmdProjectComplete(subargs); break;
           case 'move': await cmdProjectMove(subargs); break;
+          case 'open': {
+            const name = resolveAlias(subargs[0]);
+            if (!name) {
+              console.error(colors.red('Error: Project name required'));
+              console.error('Usage: linear project open "Project Name"');
+              process.exit(1);
+            }
+            writeConfigValue('project', name);
+            DEFAULT_PROJECT = name;
+            console.log(colors.green(`Opened project: ${name}`));
+            console.log(colors.gray(`Saved to ${CONFIG_FILE}`));
+            break;
+          }
+          case 'close': {
+            const removed = removeConfigValue('project');
+            if (removed) {
+              console.log(colors.green(`Closed project: ${removed}`));
+              DEFAULT_PROJECT = '';
+            } else {
+              console.log(colors.gray('No project was open'));
+            }
+            break;
+          }
           default:
             console.error(`Unknown project command: ${subcmd}`);
             process.exit(1);
@@ -3417,6 +3580,29 @@ async function main() {
           case 'show': await cmdMilestoneShow(subargs); break;
           case 'create': await cmdMilestoneCreate(subargs); break;
           case 'move': await cmdMilestoneMove(subargs); break;
+          case 'open': {
+            const name = resolveAlias(subargs[0]);
+            if (!name) {
+              console.error(colors.red('Error: Milestone name required'));
+              console.error('Usage: linear milestone open "Milestone Name"');
+              process.exit(1);
+            }
+            writeConfigValue('milestone', name);
+            DEFAULT_MILESTONE = name;
+            console.log(colors.green(`Opened milestone: ${name}`));
+            console.log(colors.gray(`Saved to ${CONFIG_FILE}`));
+            break;
+          }
+          case 'close': {
+            const removed = removeConfigValue('milestone');
+            if (removed) {
+              console.log(colors.green(`Closed milestone: ${removed}`));
+              DEFAULT_MILESTONE = '';
+            } else {
+              console.log(colors.gray('No milestone was open'));
+            }
+            break;
+          }
           default:
             console.error(`Unknown milestone command: ${subcmd}`);
             process.exit(1);

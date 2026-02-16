@@ -25,12 +25,14 @@ This will:
 
 ## Configuration
 
-Config is loaded in order: `./.linear` → `~/.linear` → env vars
+Config is layered: `~/.linear` (global) is loaded first, then `./.linear` (local) overrides on top. Local values override global; unset local values inherit from global. Env vars (`LINEAR_API_KEY`, `LINEAR_TEAM`, `LINEAR_PROJECT`, `LINEAR_MILESTONE`) are used as fallbacks.
 
 ```
 # .linear file format
 api_key=lin_api_xxx
 team=ISSUE
+project=My Project
+milestone=Sprint 3
 
 [aliases]
 V2=Version 2.0 Release
@@ -83,8 +85,16 @@ linear whoami                   # Show current user/team
 # Roadmap (overview)
 linear roadmap                  # Projects with milestones and progress
 
+# Default context (sets project/milestone for issues & create)
+linear project open "Phase 1"    # Set default project
+linear milestone open "Sprint 3" # Set default milestone
+linear project close             # Clear default project
+linear milestone close           # Clear default milestone
+
 # Issues
-linear issues                    # Default: backlog + todo issues
+linear issues                    # Default: backlog + todo issues (filtered by open project/milestone)
+linear issues --no-project       # Bypass default project filter
+linear issues --no-milestone     # Bypass default milestone filter
 linear issues --unblocked       # Ready to work on (no blockers)
 linear issues --open            # All non-completed issues
 linear issues --status todo     # Only todo issues
@@ -123,11 +133,15 @@ linear projects --all           # Include completed
 linear project show "Phase 1"   # Details with issues
 linear project create "Name" --description "..."
 linear project complete "Phase 1"
+linear project open "Phase 1"   # Set as default project
+linear project close            # Clear default project
 
 # Milestones
 linear milestones --project "P1" # Milestones in a project
 linear milestone show "Beta"     # Details with issues
 linear milestone create "Beta" --project "P1" --target-date 2024-03-01
+linear milestone open "Beta"    # Set as default milestone
+linear milestone close          # Clear default milestone
 
 # Reordering (drag-drop equivalent)
 linear projects reorder "P1" "P2" "P3"           # Set project order
@@ -189,6 +203,16 @@ gh pr create --title "ISSUE-5: Add caching layer"
 ```
 
 ## Workflow Guidelines
+
+### Setting context
+When working on a specific project/milestone, set it as default to avoid repeating flags:
+```bash
+linear project open "Phase 1"    # All commands now default to Phase 1
+linear milestone open "Sprint 3" # And to Sprint 3 milestone
+linear issues                    # Shows Phase 1 > Sprint 3 issues only
+linear issue create --title "Fix" # Created in Phase 1, Sprint 3
+linear project close             # Done? Clear the context
+```
 
 ### Getting oriented
 ```bash
