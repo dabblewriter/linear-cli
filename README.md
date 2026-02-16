@@ -50,9 +50,11 @@ linear whoami             # Show current user and team
 
 ### Issues
 ```bash
+linear issues                        # Default: backlog + todo
 linear issues --unblocked           # Ready to work on
 linear issues --open                # All non-completed issues
-linear issues --in-progress         # Issues in progress
+linear issues --status in-progress  # Filter by status
+linear issues --status todo --status in-progress  # Multiple statuses
 linear issues --mine                # Only your issues
 linear issues --label bug           # Filter by label
 linear issue show ISSUE-1            # Full details with parent context

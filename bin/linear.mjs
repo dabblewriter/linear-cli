@@ -288,6 +288,14 @@ function parseArgs(args, flags = {}) {
       const flagDef = flags[key];
       if (flagDef === 'boolean') {
         result[key] = true;
+      } else if (flagDef === 'array') {
+        const value = args[++i];
+        if (value === undefined || value.startsWith('-')) {
+          console.error(colors.red(`Error: --${key} requires a value`));
+          process.exit(1);
+        }
+        result[key] = result[key] || [];
+        result[key].push(value);
       } else {
         const value = args[++i];
         if (value === undefined || value.startsWith('-')) {
@@ -313,27 +321,41 @@ async function cmdIssues(args) {
     unblocked: 'boolean', u: 'boolean',
     all: 'boolean', a: 'boolean',
     open: 'boolean', o: 'boolean',
-    backlog: 'boolean', b: 'boolean',
     mine: 'boolean', m: 'boolean',
-    'in-progress': 'boolean',
+    status: 'array', s: 'array',
     project: 'string', p: 'string',
     milestone: 'string',
-    state: 'string', s: 'string',
-    label: 'string', l: 'string',
+    label: 'array', l: 'array',
     priority: 'string',
   });
 
-  const inProgress = opts['in-progress'];
   const unblocked = opts.unblocked || opts.u;
   const allStates = opts.all || opts.a;
   const openOnly = opts.open || opts.o;
-  const backlogOnly = opts.backlog || opts.b;
   const mineOnly = opts.mine || opts.m;
+  const statusFilter = opts.status || opts.s || [];
   const projectFilter = opts.project || opts.p;
   const milestoneFilter = opts.milestone;
-  const stateFilter = opts.state || opts.s;
-  const labelFilter = opts.label || opts.l;
+  const labelFilters = opts.label || opts.l || [];
   const priorityFilter = (opts.priority || '').toLowerCase();
+
+  // Map user-friendly status names to Linear's internal state types
+  const STATUS_TYPE_MAP = {
+    'backlog': 'backlog',
+    'todo': 'unstarted',
+    'in-progress': 'started',
+    'inprogress': 'started',
+    'in_progress': 'started',
+    'started': 'started',
+    'done': 'completed',
+    'completed': 'completed',
+    'canceled': 'canceled',
+    'cancelled': 'canceled',
+    'triage': 'triage',
+  };
+
+  // Resolve status filters to state types (match by type map or by state name)
+  const resolvedStatusTypes = statusFilter.map(s => STATUS_TYPE_MAP[s.toLowerCase()] || s.toLowerCase());
 
   // Get current user ID for filtering/sorting
   const viewerResult = await gql('{ viewer { id } }');
@@ -411,9 +433,9 @@ async function cmdIssues(args) {
     if (mineOnly) {
       filtered = filtered.filter(i => i.assignee?.id === viewerId);
     }
-    if (labelFilter) {
+    if (labelFilters.length > 0) {
       filtered = filtered.filter(i =>
-        i.labels?.nodes?.some(l => l.name.toLowerCase() === labelFilter.toLowerCase())
+        labelFilters.some(lf => i.labels?.nodes?.some(l => l.name.toLowerCase() === lf.toLowerCase()))
       );
     }
     if (projectFilter) {
@@ -437,6 +459,13 @@ async function cmdIssues(args) {
     return filtered;
   };
 
+  // Apply status filter to issues
+  const filterByStatus = (list, types) => {
+    return list.filter(i =>
+      types.includes(i.state.type) || types.includes(i.state.name.toLowerCase())
+    );
+  };
+
   if (unblocked) {
     // Collect all blocked issue IDs
     const blocked = new Set();
@@ -453,48 +482,48 @@ async function cmdIssues(args) {
       !['completed', 'canceled'].includes(i.state.type) &&
       !blocked.has(i.identifier)
     );
+    if (resolvedStatusTypes.length > 0) {
+      filtered = filterByStatus(filtered, resolvedStatusTypes);
+    }
 
     filtered = applyFilters(filtered);
 
     console.log(colors.bold('Unblocked Issues:\n'));
     console.log(formatTable(filtered.map(formatRow)));
   } else if (allStates) {
-    let filtered = applyFilters(issues);
+    let filtered = issues;
+    if (resolvedStatusTypes.length > 0) {
+      filtered = filterByStatus(filtered, resolvedStatusTypes);
+    }
+    filtered = applyFilters(filtered);
 
     console.log(colors.bold('All Issues:\n'));
     console.log(formatTable(filtered.map(formatRow)));
   } else if (openOnly) {
-    // Open = everything except completed/canceled
     let filtered = issues.filter(i =>
       !['completed', 'canceled'].includes(i.state.type)
     );
+    if (resolvedStatusTypes.length > 0) {
+      filtered = filterByStatus(filtered, resolvedStatusTypes);
+    }
 
     filtered = applyFilters(filtered);
 
     console.log(colors.bold('Open Issues:\n'));
     console.log(formatTable(filtered.map(formatRow)));
-  } else if (inProgress) {
-    let filtered = issues.filter(i => i.state.type === 'started');
+  } else if (resolvedStatusTypes.length > 0) {
+    let filtered = filterByStatus(issues, resolvedStatusTypes);
     filtered = applyFilters(filtered);
 
-    console.log(colors.bold('In Progress:\n'));
-    console.log(formatTable(filtered.map(formatRow)));
-  } else if (backlogOnly || stateFilter) {
-    const targetState = stateFilter || 'backlog';
-    let filtered = issues.filter(i =>
-      i.state.type === targetState || i.state.name.toLowerCase() === targetState.toLowerCase()
-    );
-
-    filtered = applyFilters(filtered);
-
-    console.log(colors.bold(`Issues (${targetState}):\n`));
+    const label = statusFilter.join(' + ');
+    console.log(colors.bold(`Issues (${label}):\n`));
     console.log(formatTable(filtered.map(formatRow)));
   } else {
-    // Default: show backlog
-    let filtered = issues.filter(i => i.state.type === 'backlog');
+    // Default: show backlog + todo
+    let filtered = issues.filter(i => i.state.type === 'backlog' || i.state.type === 'unstarted');
     filtered = applyFilters(filtered);
 
-    console.log(colors.bold('Issues (backlog):\n'));
+    console.log(colors.bold('Issues (backlog + todo):\n'));
     console.log(formatTable(filtered.map(formatRow)));
   }
 }
@@ -674,13 +703,13 @@ async function cmdIssueCreate(args) {
     project: 'string', p: 'string',
     milestone: 'string',
     parent: 'string',
-    state: 'string', s: 'string',
+    status: 'string', s: 'string',
     assign: 'boolean',
     estimate: 'string', e: 'string',
     priority: 'string',
-    label: 'string', l: 'string',
-    blocks: 'string',
-    'blocked-by': 'string',
+    label: 'array', l: 'array',
+    blocks: 'array',
+    'blocked-by': 'array',
   });
 
   const title = opts.title || opts.t || opts._[0];
@@ -691,9 +720,9 @@ async function cmdIssueCreate(args) {
   const parent = opts.parent;
   const shouldAssign = opts.assign;
   const estimate = (opts.estimate || opts.e || '').toLowerCase();
-  const labelName = opts.label || opts.l;
-  const blocksIssue = opts.blocks;
-  const blockedByIssue = opts['blocked-by'];
+  const labelNames = opts.label || opts.l || [];
+  const blocksIssues = opts.blocks || [];
+  const blockedByIssues = opts['blocked-by'] || [];
 
   if (!title) {
     console.error(colors.red('Error: Title is required'));
@@ -765,20 +794,22 @@ async function cmdIssueCreate(args) {
     }
   }
 
-  // Look up label ID
+  // Look up label IDs
   let labelIds = [];
-  if (labelName) {
+  if (labelNames.length > 0) {
     const labelsResult = await gql(`{
       team(id: "${TEAM_KEY}") {
         labels(first: 100) { nodes { id name } }
       }
     }`);
     const labels = labelsResult.data?.team?.labels?.nodes || [];
-    const match = labels.find(l => l.name.toLowerCase() === labelName.toLowerCase());
-    if (match) {
-      labelIds.push(match.id);
-    } else {
-      console.error(colors.yellow(`Warning: Label "${labelName}" not found. Creating issue without label.`));
+    for (const labelName of labelNames) {
+      const match = labels.find(l => l.name.toLowerCase() === labelName.toLowerCase());
+      if (match) {
+        labelIds.push(match.id);
+      } else {
+        console.error(colors.yellow(`Warning: Label "${labelName}" not found.`));
+      }
     }
   }
 
@@ -817,27 +848,25 @@ async function cmdIssueCreate(args) {
     console.log(issue.url);
 
     // Create blocking relations if specified
-    if (blocksIssue || blockedByIssue) {
+    if (blocksIssues.length > 0 || blockedByIssues.length > 0) {
       const relationMutation = `
         mutation($input: IssueRelationCreateInput!) {
           issueRelationCreate(input: $input) { success }
         }
       `;
 
-      if (blocksIssue) {
-        // This issue blocks another issue
+      for (const target of blocksIssues) {
         await gql(relationMutation, {
-          input: { issueId: issue.identifier, relatedIssueId: blocksIssue, type: 'blocks' }
+          input: { issueId: issue.identifier, relatedIssueId: target, type: 'blocks' }
         });
-        console.log(colors.gray(`  → blocks ${blocksIssue}`));
+        console.log(colors.gray(`  → blocks ${target}`));
       }
 
-      if (blockedByIssue) {
-        // This issue is blocked by another issue
+      for (const target of blockedByIssues) {
         await gql(relationMutation, {
-          input: { issueId: blockedByIssue, relatedIssueId: issue.identifier, type: 'blocks' }
+          input: { issueId: target, relatedIssueId: issue.identifier, type: 'blocks' }
         });
-        console.log(colors.gray(`  → blocked by ${blockedByIssue}`));
+        console.log(colors.gray(`  → blocked by ${target}`));
       }
     }
   } else {
@@ -857,25 +886,51 @@ async function cmdIssueUpdate(args) {
   const opts = parseArgs(args.slice(1), {
     title: 'string', t: 'string',
     description: 'string', d: 'string',
-    state: 'string', s: 'string',
+    status: 'string', s: 'string',
     project: 'string', p: 'string',
     milestone: 'string',
     priority: 'string',
+    estimate: 'string', e: 'string',
+    label: 'array', l: 'array',
+    assign: 'boolean',
+    parent: 'string',
     append: 'string', a: 'string',
     check: 'string',
     uncheck: 'string',
-    blocks: 'string',
-    'blocked-by': 'string',
+    blocks: 'array',
+    'blocked-by': 'array',
   });
 
-  const blocksIssue = opts.blocks;
-  const blockedByIssue = opts['blocked-by'];
+  const blocksIssues = opts.blocks || [];
+  const blockedByIssues = opts['blocked-by'] || [];
   const projectName = resolveAlias(opts.project || opts.p);
   const milestoneName = resolveAlias(opts.milestone);
   const priorityName = (opts.priority || '').toLowerCase();
+  const estimate = (opts.estimate || opts.e || '').toLowerCase();
+  const labelNames = opts.label || opts.l || [];
+  const shouldAssign = opts.assign;
+  const parent = opts.parent;
   const input = {};
 
   if (opts.title || opts.t) input.title = opts.title || opts.t;
+
+  // Handle estimate
+  if (estimate) {
+    if (!ESTIMATE_MAP.hasOwnProperty(estimate)) {
+      console.error(colors.red(`Error: Invalid estimate "${estimate}". Use: XS, S, M, L, or XL`));
+      process.exit(1);
+    }
+    input.estimate = ESTIMATE_MAP[estimate];
+  }
+
+  // Handle parent
+  if (parent) input.parentId = parent;
+
+  // Handle assign
+  if (shouldAssign) {
+    const viewerResult = await gql('{ viewer { id } }');
+    input.assigneeId = viewerResult.data?.viewer?.id;
+  }
 
   // Handle priority
   if (priorityName) {
@@ -960,8 +1015,8 @@ async function cmdIssueUpdate(args) {
   }
 
   // Handle state
-  if (opts.state || opts.s) {
-    const stateName = opts.state || opts.s;
+  if (opts.status || opts.s) {
+    const stateName = opts.status || opts.s;
     const statesResult = await gql(`{
       team(id: "${TEAM_KEY}") {
         states { nodes { id name } }
@@ -970,6 +1025,26 @@ async function cmdIssueUpdate(args) {
     const states = statesResult.data?.team?.states?.nodes || [];
     const match = states.find(s => s.name.toLowerCase().includes(stateName.toLowerCase()));
     if (match) input.stateId = match.id;
+  }
+
+  // Handle labels
+  if (labelNames.length > 0) {
+    const labelsResult = await gql(`{
+      team(id: "${TEAM_KEY}") {
+        labels(first: 100) { nodes { id name } }
+      }
+    }`);
+    const labels = labelsResult.data?.team?.labels?.nodes || [];
+    const labelIds = [];
+    for (const labelName of labelNames) {
+      const match = labels.find(l => l.name.toLowerCase() === labelName.toLowerCase());
+      if (match) {
+        labelIds.push(match.id);
+      } else {
+        console.error(colors.yellow(`Warning: Label "${labelName}" not found.`));
+      }
+    }
+    if (labelIds.length > 0) input.labelIds = labelIds;
   }
 
   // Handle project and milestone
@@ -1013,7 +1088,7 @@ async function cmdIssueUpdate(args) {
   }
 
   // Handle blocking relations (can be set even without other updates)
-  const hasRelationUpdates = blocksIssue || blockedByIssue;
+  const hasRelationUpdates = blocksIssues.length > 0 || blockedByIssues.length > 0;
 
   if (Object.keys(input).length === 0 && !hasRelationUpdates) {
     console.error(colors.red('Error: No updates specified'));
@@ -1052,18 +1127,18 @@ async function cmdIssueUpdate(args) {
       }
     `;
 
-    if (blocksIssue) {
+    for (const target of blocksIssues) {
       await gql(relationMutation, {
-        input: { issueId: issueId, relatedIssueId: blocksIssue, type: 'blocks' }
+        input: { issueId: issueId, relatedIssueId: target, type: 'blocks' }
       });
-      console.log(colors.green(`${issueId} now blocks ${blocksIssue}`));
+      console.log(colors.green(`${issueId} now blocks ${target}`));
     }
 
-    if (blockedByIssue) {
+    for (const target of blockedByIssues) {
       await gql(relationMutation, {
-        input: { issueId: blockedByIssue, relatedIssueId: issueId, type: 'blocks' }
+        input: { issueId: target, relatedIssueId: issueId, type: 'blocks' }
       });
-      console.log(colors.green(`${issueId} now blocked by ${blockedByIssue}`));
+      console.log(colors.green(`${issueId} now blocked by ${target}`));
     }
   }
 }
@@ -3114,17 +3189,15 @@ PLANNING:
     --all, -a                Include completed projects
 
 ISSUES:
-  issues [options]           List issues (default: backlog, yours first)
+  issues [options]           List issues (default: backlog + todo, yours first)
     --unblocked, -u          Show only unblocked issues
     --open, -o               Show all non-completed/canceled issues
-    --backlog, -b            Show only backlog issues
+    --status, -s <name>      Filter by status (repeatable: --status todo --status backlog)
     --all, -a                Show all states (including completed)
     --mine, -m               Show only issues assigned to you
-    --in-progress            Show issues in progress
     --project, -p <name>     Filter by project
     --milestone <name>       Filter by milestone
-    --state, -s <state>      Filter by state
-    --label, -l <name>       Filter by label
+    --label, -l <name>       Filter by label (repeatable)
     --priority <level>       Filter by priority (urgent/high/medium/low/none)
   issues reorder <ids...>    Reorder issues by listing IDs in order
 
@@ -3139,21 +3212,25 @@ ISSUES:
     --assign                 Assign to yourself
     --estimate, -e <size>    Estimate: XS, S, M, L, XL
     --priority <level>       Priority: urgent, high, medium, low, none
-    --label, -l <name>       Add label
-    --blocks <id>            This issue blocks another
-    --blocked-by <id>        This issue is blocked by another
+    --label, -l <name>       Add label (repeatable)
+    --blocks <id>            This issue blocks another (repeatable)
+    --blocked-by <id>        This issue is blocked by another (repeatable)
   issue update <id> [opts]   Update an issue
     --title, -t <title>      New title
     --description, -d <desc> New description
-    --state, -s <state>      New state
+    --status, -s <status>    New status (todo, in-progress, done, backlog, etc.)
     --project, -p <name>     Move to project
     --milestone <name>       Move to milestone
+    --parent <id>            Set parent issue
+    --assign                 Assign to yourself
+    --estimate, -e <size>    Set estimate: XS, S, M, L, XL
     --priority <level>       Set priority (urgent/high/medium/low/none)
+    --label, -l <name>       Set label (repeatable)
     --append, -a <text>      Append to description
     --check <text>           Check a checkbox item (fuzzy match)
     --uncheck <text>         Uncheck a checkbox item (fuzzy match)
-    --blocks <id>            Add blocking relation
-    --blocked-by <id>        Add blocked-by relation
+    --blocks <id>            Add blocking relation (repeatable)
+    --blocked-by <id>        Add blocked-by relation (repeatable)
   issue close <id>           Mark issue as done
   issue comment <id> <body>  Add a comment
   issue move <id>            Move issue in sort order

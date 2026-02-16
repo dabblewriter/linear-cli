@@ -84,28 +84,36 @@ linear whoami                   # Show current user/team
 linear roadmap                  # Projects with milestones and progress
 
 # Issues
+linear issues                    # Default: backlog + todo issues
 linear issues --unblocked       # Ready to work on (no blockers)
 linear issues --open            # All non-completed issues
-linear issues --backlog         # Backlog issues only
-linear issues --in-progress     # Issues currently in progress
+linear issues --status todo     # Only todo issues
+linear issues --status backlog  # Only backlog issues
+linear issues --status in-progress # Issues currently in progress
+linear issues --status todo --status in-progress # Multiple statuses
 linear issues --mine            # Only your assigned issues
 linear issues --project "Name"  # Issues in a project
 linear issues --milestone "M1"  # Issues in a milestone
 linear issues --label bug       # Filter by label
 linear issues --priority urgent # Filter by priority (urgent/high/medium/low/none)
-# Flags can be combined: linear issues --in-progress --mine
+# Flags can be combined: linear issues --status todo --mine
 linear issue show ISSUE-1        # Full details with parent context
 linear issue start ISSUE-1       # Assign to you + set In Progress
 linear issue create --title "Fix bug" --project "Phase 1" --assign --estimate M
 linear issue create --title "Urgent bug" --priority urgent --assign
 linear issue create --title "Task" --milestone "Beta" --estimate S
-linear issue create --title "Blocked task" --blocked-by ISSUE-1
-linear issue update ISSUE-1 --state "In Progress"
+linear issue create --title "Blocked task" --blocked-by ISSUE-1 --blocked-by ISSUE-2
+linear issue create --title "Labeled" --label bug --label frontend  # Multiple labels
+linear issue update ISSUE-1 --status "In Progress"
 linear issue update ISSUE-1 --priority high   # Set priority
+linear issue update ISSUE-1 --estimate M      # Set estimate
+linear issue update ISSUE-1 --label bug --label frontend  # Set labels (repeatable)
+linear issue update ISSUE-1 --assign          # Assign to yourself
+linear issue update ISSUE-1 --parent ISSUE-2  # Set parent issue
 linear issue update ISSUE-1 --milestone "Beta"
 linear issue update ISSUE-1 --append "Notes..."
 linear issue update ISSUE-1 --check "validation" # Check off a todo item
-linear issue update ISSUE-1 --blocks ISSUE-2  # Add blocking relation
+linear issue update ISSUE-1 --blocks ISSUE-2 --blocks ISSUE-3  # Repeatable
 linear issue close ISSUE-1
 linear issue comment ISSUE-1 "Comment text"
 
