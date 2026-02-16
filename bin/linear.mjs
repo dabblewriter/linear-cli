@@ -313,7 +313,7 @@ function checkAuth() {
   }
 }
 
-async function gql(query, variables = {}) {
+async function gql(query, variables = {}, { retry = true } = {}) {
   let response;
   try {
     response = await fetch(API_URL, {
@@ -323,9 +323,15 @@ async function gql(query, variables = {}) {
         'Authorization': LINEAR_API_KEY,
       },
       body: JSON.stringify({ query, variables }),
+      signal: AbortSignal.timeout(10000),
     });
   } catch (err) {
-    console.error(colors.red(`Network error: ${err.message}`));
+    if (retry && err.name === 'TimeoutError') {
+      console.error(colors.gray('Request timed out, retrying...'));
+      return gql(query, variables, { retry: false });
+    }
+    const msg = err.name === 'TimeoutError' ? 'Request timed out (10s) — Linear API may be slow, try again' : `Network error: ${err.message}`;
+    console.error(colors.red(msg));
     process.exit(1);
   }
 
