@@ -25,11 +25,13 @@ No tests exist currently. The CLI requires Node 18+ (uses native `fetch`).
 **Single-file design**: All CLI logic lives in `bin/linear.mjs` (~2000 lines). This is intentional - zero npm dependencies, just Node.js built-ins.
 
 **Configuration loading** (priority order):
+
 1. `./.linear` (project-specific)
 2. `~/.linear` (global fallback)
 3. Environment variables (`LINEAR_API_KEY`, `LINEAR_TEAM`)
 
 **Key functions**:
+
 - `gql()` - GraphQL client using native fetch
 - `parseArgs()` - Custom argument parser supporting `--flag value` and `--boolean` patterns
 - `cmd*()` functions - Command handlers (e.g., `cmdIssues`, `cmdIssueCreate`)
@@ -39,11 +41,11 @@ No tests exist currently. The CLI requires Node 18+ (uses native `fetch`).
 ## Claude Code Integration
 
 The `claude/` directory contains files installed to `~/.claude/`:
+
 - `skills/linear-cli.md` - Teaches Claude how to use the CLI
 - `skills/product-planning.md` - Product planning workflows
 - `commands/next.md` - `/next` command implementation
 - `commands/done.md` - `/done` command implementation
-- `commands/standup.md` - `/standup` command implementation
 
 ## Git Conventions
 

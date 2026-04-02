@@ -320,7 +320,7 @@ async function gql(query, variables = {}, { retry = true } = {}) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': LINEAR_API_KEY,
+        Authorization: LINEAR_API_KEY,
       },
       body: JSON.stringify({ query, variables }),
       signal: AbortSignal.timeout(10000),
@@ -330,7 +330,10 @@ async function gql(query, variables = {}, { retry = true } = {}) {
       console.error(colors.gray('Request timed out, retrying...'));
       return gql(query, variables, { retry: false });
     }
-    const msg = err.name === 'TimeoutError' ? 'Request timed out (10s) — Linear API may be slow, try again' : `Network error: ${err.message}`;
+    const msg =
+      err.name === 'TimeoutError'
+        ? 'Request timed out (10s) — Linear API may be slow, try again'
+        : `Network error: ${err.message}`;
     console.error(colors.red(msg));
     process.exit(1);
   }
@@ -363,7 +366,10 @@ function prompt(question) {
 function suggestTeamKey(teamName) {
   // Generate acronym from first letter of each word
   const words = teamName.trim().split(/\s+/);
-  let key = words.map(w => w[0] || '').join('').toUpperCase();
+  let key = words
+    .map(w => w[0] || '')
+    .join('')
+    .toUpperCase();
 
   // If single word or very short, use first 3-4 chars instead
   if (key.length < 2) {
@@ -401,14 +407,18 @@ function formatTable(rows) {
       colWidths[i] = Math.max(colWidths[i] || 0, stripAnsi(String(cell)).length);
     });
   }
-  return rows.map(row =>
-    row.map((cell, i) => {
-      const str = String(cell);
-      const visibleLen = stripAnsi(str).length;
-      // Pad based on visible length, not string length
-      return str + ' '.repeat(Math.max(0, colWidths[i] - visibleLen));
-    }).join('  ')
-  ).join('\n');
+  return rows
+    .map(row =>
+      row
+        .map((cell, i) => {
+          const str = String(cell);
+          const visibleLen = stripAnsi(str).length;
+          // Pad based on visible length, not string length
+          return str + ' '.repeat(Math.max(0, colWidths[i] - visibleLen));
+        })
+        .join('  ')
+    )
+    .join('\n');
 }
 
 function parseArgs(args, flags = {}) {
@@ -429,6 +439,15 @@ function parseArgs(args, flags = {}) {
         }
         result[key] = result[key] || [];
         result[key].push(value);
+      } else if (flagDef === 'optionalArray') {
+        const next = args[i + 1];
+        result[key] = result[key] || [];
+        if (next === undefined || next.startsWith('-')) {
+          result[key].push(true);
+        } else {
+          i++;
+          result[key].push(next);
+        }
       } else {
         const value = args[++i];
         if (value === undefined || value.startsWith('-')) {
@@ -451,16 +470,23 @@ function parseArgs(args, flags = {}) {
 
 async function cmdIssues(args) {
   const opts = parseArgs(args, {
-    unblocked: 'boolean', u: 'boolean',
-    all: 'boolean', a: 'boolean',
-    open: 'boolean', o: 'boolean',
-    mine: 'boolean', m: 'boolean',
-    status: 'array', s: 'array',
-    project: 'string', p: 'string',
+    unblocked: 'boolean',
+    u: 'boolean',
+    all: 'boolean',
+    a: 'boolean',
+    open: 'boolean',
+    o: 'boolean',
+    mine: 'boolean',
+    m: 'boolean',
+    status: 'array',
+    s: 'array',
+    project: 'string',
+    p: 'string',
     milestone: 'string',
     'no-project': 'boolean',
     'no-milestone': 'boolean',
-    label: 'array', l: 'array',
+    label: 'array',
+    l: 'array',
     priority: 'string',
   });
 
@@ -471,24 +497,24 @@ async function cmdIssues(args) {
   const statusFilter = opts.status || opts.s || [];
   const noProject = opts['no-project'];
   const noMilestone = opts['no-milestone'];
-  const projectFilter = noProject ? '' : (opts.project || opts.p || DEFAULT_PROJECT);
-  const milestoneFilter = noMilestone ? '' : (opts.milestone || DEFAULT_MILESTONE);
+  const projectFilter = noProject ? '' : opts.project || opts.p || DEFAULT_PROJECT;
+  const milestoneFilter = noMilestone ? '' : opts.milestone || DEFAULT_MILESTONE;
   const labelFilters = opts.label || opts.l || [];
   const priorityFilter = (opts.priority || '').toLowerCase();
 
   // Map user-friendly status names to Linear's internal state types
   const STATUS_TYPE_MAP = {
-    'backlog': 'backlog',
-    'todo': 'unstarted',
+    backlog: 'backlog',
+    todo: 'unstarted',
     'in-progress': 'started',
-    'inprogress': 'started',
-    'in_progress': 'started',
-    'started': 'started',
-    'done': 'completed',
-    'completed': 'completed',
-    'canceled': 'canceled',
-    'cancelled': 'canceled',
-    'triage': 'triage',
+    inprogress: 'started',
+    in_progress: 'started',
+    started: 'started',
+    done: 'completed',
+    completed: 'completed',
+    canceled: 'canceled',
+    cancelled: 'canceled',
+    triage: 'triage',
   };
 
   // Resolve status filters to state types (match by type map or by state name)
@@ -555,12 +581,8 @@ async function cmdIssues(args) {
   const contextStr = contextParts.length > 0 ? ` [${contextParts.join(' > ')}]` : '';
 
   // Helper to format issue row
-  const formatRow = (i) => {
-    const row = [
-      i.identifier,
-      i.title,
-      i.state.name,
-    ];
+  const formatRow = i => {
+    const row = [i.identifier, i.title, i.state.name];
     if (hasPriority) {
       const pri = PRIORITY_LABELS[i.priority] || '';
       row.push(pri ? colors.bold(pri) : '-');
@@ -569,14 +591,14 @@ async function cmdIssues(args) {
       row.push(i.project?.name || '-');
     }
     if (hasAssignees) {
-      const assignee = i.assignee?.id === viewerId ? 'you' : (i.assignee?.name || '-');
+      const assignee = i.assignee?.id === viewerId ? 'you' : i.assignee?.name || '-';
       row.push(assignee);
     }
     return row;
   };
 
   // Helper to apply common filters (mine, label, project, milestone)
-  const applyFilters = (list) => {
+  const applyFilters = list => {
     let filtered = list;
     if (mineOnly) {
       filtered = filtered.filter(i => i.assignee?.id === viewerId);
@@ -588,9 +610,7 @@ async function cmdIssues(args) {
     }
     if (projectFilter) {
       const resolvedProject = resolveAlias(projectFilter);
-      filtered = filtered.filter(i =>
-        i.project?.name?.toLowerCase().includes(resolvedProject.toLowerCase())
-      );
+      filtered = filtered.filter(i => i.project?.name?.toLowerCase().includes(resolvedProject.toLowerCase()));
     }
     if (milestoneFilter) {
       const resolvedMilestone = resolveAlias(milestoneFilter);
@@ -609,9 +629,7 @@ async function cmdIssues(args) {
 
   // Apply status filter to issues
   const filterByStatus = (list, types) => {
-    return list.filter(i =>
-      types.includes(i.state.type) || types.includes(i.state.name.toLowerCase())
-    );
+    return list.filter(i => types.includes(i.state.type) || types.includes(i.state.name.toLowerCase()));
   };
 
   if (unblocked) {
@@ -626,10 +644,7 @@ async function cmdIssues(args) {
     }
 
     // Filter to unblocked, non-completed issues
-    let filtered = issues.filter(i =>
-      !['completed', 'canceled'].includes(i.state.type) &&
-      !blocked.has(i.identifier)
-    );
+    let filtered = issues.filter(i => !['completed', 'canceled'].includes(i.state.type) && !blocked.has(i.identifier));
     if (resolvedStatusTypes.length > 0) {
       filtered = filterByStatus(filtered, resolvedStatusTypes);
     }
@@ -648,9 +663,7 @@ async function cmdIssues(args) {
     console.log(colors.bold(`All Issues${contextStr}:\n`));
     console.log(formatTable(filtered.map(formatRow)));
   } else if (openOnly) {
-    let filtered = issues.filter(i =>
-      !['completed', 'canceled'].includes(i.state.type)
-    );
+    let filtered = issues.filter(i => !['completed', 'canceled'].includes(i.state.type));
     if (resolvedStatusTypes.length > 0) {
       filtered = filterByStatus(filtered, resolvedStatusTypes);
     }
@@ -762,7 +775,9 @@ async function cmdIssueShow(args) {
 
         if (isCurrent && isDirectParent) {
           // This is the current issue - highlight it
-          console.log(`${sibIndent}${colors.green('→')} [${sibling.state.name}] ${colors.green(sibling.identifier)}: ${sibling.title} ${colors.green('← you are here')}`);
+          console.log(
+            `${sibIndent}${colors.green('→')} [${sibling.state.name}] ${colors.green(sibling.identifier)}: ${sibling.title} ${colors.green('← you are here')}`
+          );
         } else {
           console.log(`${sibIndent}- [${sibling.state.name}] ${sibling.identifier}: ${sibling.title}`);
         }
@@ -819,11 +834,11 @@ async function cmdIssueShow(args) {
 
 // T-shirt size to Linear estimate mapping
 const ESTIMATE_MAP = {
-  'xs': 0,
-  's': 1,
-  'm': 2,
-  'l': 3,
-  'xl': 5,
+  xs: 0,
+  s: 1,
+  m: 2,
+  l: 3,
+  xl: 5,
 };
 
 // Linear priority values (lower number = higher priority)
@@ -837,25 +852,31 @@ const PRIORITY_LABELS = {
 };
 
 const PRIORITY_MAP = {
-  'urgent': 1,
-  'high': 2,
-  'medium': 3,
-  'low': 4,
-  'none': 0,
+  urgent: 1,
+  high: 2,
+  medium: 3,
+  low: 4,
+  none: 0,
 };
 
 async function cmdIssueCreate(args) {
   const opts = parseArgs(args, {
-    title: 'string', t: 'string',
-    description: 'string', d: 'string',
-    project: 'string', p: 'string',
+    title: 'string',
+    t: 'string',
+    description: 'string',
+    d: 'string',
+    project: 'string',
+    p: 'string',
     milestone: 'string',
     parent: 'string',
-    status: 'string', s: 'string',
+    status: 'string',
+    s: 'string',
     assign: 'boolean',
-    estimate: 'string', e: 'string',
+    estimate: 'string',
+    e: 'string',
     priority: 'string',
-    label: 'array', l: 'array',
+    label: 'array',
+    l: 'array',
     blocks: 'array',
     'blocked-by': 'array',
   });
@@ -874,7 +895,9 @@ async function cmdIssueCreate(args) {
 
   if (!title) {
     console.error(colors.red('Error: Title is required'));
-    console.error('Usage: linear issue create --title "Issue title" [--project "..."] [--milestone "..."] [--parent ISSUE-X] [--estimate M] [--priority urgent] [--assign] [--label bug] [--blocks ISSUE-X] [--blocked-by ISSUE-X]');
+    console.error(
+      'Usage: linear issue create --title "Issue title" [--project "..."] [--milestone "..."] [--parent ISSUE-X] [--estimate M] [--priority urgent] [--assign] [--label bug] [--blocks ISSUE-X] [--blocked-by ISSUE-X]'
+    );
     process.exit(1);
   }
 
@@ -991,7 +1014,8 @@ async function cmdIssueCreate(args) {
   if (result.data?.issueCreate?.success) {
     const issue = result.data.issueCreate.issue;
     const estLabel = estimate ? ` [${estimate.toUpperCase()}]` : '';
-    const priLabel = priority && priority !== 'none' ? ` [${priority.charAt(0).toUpperCase() + priority.slice(1)}]` : '';
+    const priLabel =
+      priority && priority !== 'none' ? ` [${priority.charAt(0).toUpperCase() + priority.slice(1)}]` : '';
     console.log(colors.green(`Created: ${issue.identifier}${estLabel}${priLabel}`));
     console.log(issue.url);
 
@@ -1005,14 +1029,22 @@ async function cmdIssueCreate(args) {
 
       for (const target of blocksIssues) {
         await gql(relationMutation, {
-          input: { issueId: issue.identifier, relatedIssueId: target, type: 'blocks' }
+          input: {
+            issueId: issue.identifier,
+            relatedIssueId: target,
+            type: 'blocks',
+          },
         });
         console.log(colors.gray(`  → blocks ${target}`));
       }
 
       for (const target of blockedByIssues) {
         await gql(relationMutation, {
-          input: { issueId: target, relatedIssueId: issue.identifier, type: 'blocks' }
+          input: {
+            issueId: target,
+            relatedIssueId: issue.identifier,
+            type: 'blocks',
+          },
         });
         console.log(colors.gray(`  → blocked by ${target}`));
       }
@@ -1032,25 +1064,34 @@ async function cmdIssueUpdate(args) {
   }
 
   const opts = parseArgs(args.slice(1), {
-    title: 'string', t: 'string',
-    description: 'string', d: 'string',
-    status: 'string', s: 'string',
-    project: 'string', p: 'string',
+    title: 'string',
+    t: 'string',
+    description: 'string',
+    d: 'string',
+    status: 'string',
+    s: 'string',
+    project: 'string',
+    p: 'string',
     milestone: 'string',
     priority: 'string',
-    estimate: 'string', e: 'string',
-    label: 'array', l: 'array',
+    estimate: 'string',
+    e: 'string',
+    label: 'array',
+    l: 'array',
     assign: 'boolean',
     parent: 'string',
-    append: 'string', a: 'string',
+    append: 'string',
+    a: 'string',
     check: 'string',
     uncheck: 'string',
     blocks: 'array',
     'blocked-by': 'array',
+    'link-pr': 'optionalArray',
   });
 
   const blocksIssues = opts.blocks || [];
   const blockedByIssues = opts['blocked-by'] || [];
+  const linkPrs = opts['link-pr'] || [];
   const projectName = resolveAlias(opts.project || opts.p);
   const milestoneName = resolveAlias(opts.milestone);
   const priorityName = (opts.priority || '').toLowerCase();
@@ -1116,9 +1157,7 @@ async function cmdIssueUpdate(args) {
     }
 
     const lines = desc.split('\n');
-    const checkboxLines = lines
-      .map((line, i) => ({ line, index: i }))
-      .filter(({ line }) => fromPattern.test(line));
+    const checkboxLines = lines.map((line, i) => ({ line, index: i })).filter(({ line }) => fromPattern.test(line));
 
     if (checkboxLines.length === 0) {
       console.error(colors.red(`Error: No ${isCheck ? 'unchecked' : 'checked'} items found in description`));
@@ -1133,18 +1172,28 @@ async function cmdIssueUpdate(args) {
     for (const { line, index } of checkboxLines) {
       const text = line.replace(/- \[[ x]\] /i, '').toLowerCase();
       // Exact match
-      if (text === queryLower) { bestMatch = { line, index }; bestScore = Infinity; break; }
+      if (text === queryLower) {
+        bestMatch = { line, index };
+        bestScore = Infinity;
+        break;
+      }
       // Substring match
       if (text.includes(queryLower) || queryLower.includes(text)) {
         const score = queryLower.length / Math.max(text.length, queryLower.length);
-        if (score > bestScore) { bestScore = score; bestMatch = { line, index }; }
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = { line, index };
+        }
       } else {
         // Word overlap scoring
         const queryWords = queryLower.split(/\s+/);
         const textWords = text.split(/\s+/);
         const overlap = queryWords.filter(w => textWords.some(tw => tw.includes(w) || w.includes(tw))).length;
         const score = overlap / Math.max(queryWords.length, textWords.length);
-        if (score > bestScore) { bestScore = score; bestMatch = { line, index }; }
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = { line, index };
+        }
       }
     }
 
@@ -1237,8 +1286,9 @@ async function cmdIssueUpdate(args) {
 
   // Handle blocking relations (can be set even without other updates)
   const hasRelationUpdates = blocksIssues.length > 0 || blockedByIssues.length > 0;
+  const hasLinkPrs = linkPrs.length > 0;
 
-  if (Object.keys(input).length === 0 && !hasRelationUpdates) {
+  if (Object.keys(input).length === 0 && !hasRelationUpdates && !hasLinkPrs) {
     console.error(colors.red('Error: No updates specified'));
     process.exit(1);
   }
@@ -1277,16 +1327,62 @@ async function cmdIssueUpdate(args) {
 
     for (const target of blocksIssues) {
       await gql(relationMutation, {
-        input: { issueId: issueId, relatedIssueId: target, type: 'blocks' }
+        input: { issueId: issueId, relatedIssueId: target, type: 'blocks' },
       });
       console.log(colors.green(`${issueId} now blocks ${target}`));
     }
 
     for (const target of blockedByIssues) {
       await gql(relationMutation, {
-        input: { issueId: target, relatedIssueId: issueId, type: 'blocks' }
+        input: { issueId: target, relatedIssueId: issueId, type: 'blocks' },
       });
       console.log(colors.green(`${issueId} now blocked by ${target}`));
+    }
+  }
+
+  // Link pull requests
+  if (hasLinkPrs) {
+    // Resolve auto-detect entries (true) to current branch's PR URL via gh
+    const prUrls = [];
+    for (const entry of linkPrs) {
+      if (entry === true) {
+        try {
+          const json = execSync('gh pr view --json url', {
+            encoding: 'utf-8',
+            stdio: ['pipe', 'pipe', 'pipe'],
+          });
+          const url = JSON.parse(json).url;
+          if (url) {
+            prUrls.push(url);
+          } else {
+            console.error(colors.red('Error: No PR found for current branch'));
+            process.exit(1);
+          }
+        } catch {
+          console.error(colors.red('Error: Could not detect PR for current branch (is gh installed and a PR open?)'));
+          process.exit(1);
+        }
+      } else {
+        prUrls.push(entry);
+      }
+    }
+
+    const linkMutation = `
+      mutation($issueId: String!, $url: String!) {
+        attachmentLinkGitHubPullRequest(issueId: $issueId, url: $url) {
+          success
+        }
+      }
+    `;
+
+    for (const url of prUrls) {
+      const result = await gql(linkMutation, { issueId, url });
+      if (result.data?.attachmentLinkGitHubPullRequest?.success) {
+        console.log(colors.green(`Linked PR: ${url}`));
+      } else {
+        console.error(colors.red(`Failed to link PR: ${url}`));
+        console.error(result.errors?.[0]?.message || JSON.stringify(result));
+      }
     }
   }
 }
@@ -1321,7 +1417,10 @@ async function cmdIssueClose(args) {
     }
   `;
 
-  const result = await gql(mutation, { id: issueId, input: { stateId: doneState.id } });
+  const result = await gql(mutation, {
+    id: issueId,
+    input: { stateId: doneState.id },
+  });
 
   if (result.data?.issueUpdate?.success) {
     console.log(colors.green(`Closed: ${issueId}`));
@@ -1367,7 +1466,7 @@ async function cmdIssueStart(args) {
 
   const result = await gql(mutation, {
     id: issueId,
-    input: { stateId: inProgressState.id, assigneeId: viewerId }
+    input: { stateId: inProgressState.id, assigneeId: viewerId },
   });
 
   if (result.data?.issueUpdate?.success) {
@@ -1434,7 +1533,7 @@ async function cmdProjects(args) {
   }
 
   // Find alias for a project (name must start with alias target)
-  const findAliasFor = (name) => {
+  const findAliasFor = name => {
     const lowerName = name.toLowerCase();
     let bestMatch = null;
     let bestLength = 0;
@@ -1511,8 +1610,10 @@ async function cmdProjectShow(args) {
 
 async function cmdProjectCreate(args) {
   const opts = parseArgs(args, {
-    name: 'string', n: 'string',
-    description: 'string', d: 'string',
+    name: 'string',
+    n: 'string',
+    description: 'string',
+    d: 'string',
   });
 
   const name = opts.name || opts.n || opts._[0];
@@ -1538,7 +1639,7 @@ async function cmdProjectCreate(args) {
   `;
 
   const result = await gql(mutation, {
-    input: { name, description, teamIds: [teamId] }
+    input: { name, description, teamIds: [teamId] },
   });
 
   if (result.data?.projectCreate?.success) {
@@ -1582,7 +1683,10 @@ async function cmdProjectComplete(args) {
     }
   `;
 
-  const result = await gql(mutation, { id: project.id, input: { state: 'completed' } });
+  const result = await gql(mutation, {
+    id: project.id,
+    input: { state: 'completed' },
+  });
 
   if (result.data?.projectUpdate?.success) {
     console.log(colors.green(`Completed project: ${projectName}`));
@@ -1599,8 +1703,10 @@ async function cmdProjectComplete(args) {
 
 async function cmdMilestones(args) {
   const opts = parseArgs(args, {
-    project: 'string', p: 'string',
-    all: 'boolean', a: 'boolean',
+    project: 'string',
+    p: 'string',
+    all: 'boolean',
+    a: 'boolean',
   });
   const projectFilter = opts.project || opts.p;
   const showAll = opts.all || opts.a;
@@ -1633,7 +1739,7 @@ async function cmdMilestones(args) {
   }
 
   // Find alias for a name (name must start with alias target)
-  const findAliasFor = (name) => {
+  const findAliasFor = name => {
     const lowerName = name.toLowerCase();
     let bestMatch = null;
     let bestLength = 0;
@@ -1703,19 +1809,14 @@ async function cmdMilestoneShow(args) {
     }
   }`;
 
-  const [projectsResult, issuesResult] = await Promise.all([
-    gql(projectsQuery),
-    gql(issuesQuery)
-  ]);
+  const [projectsResult, issuesResult] = await Promise.all([gql(projectsQuery), gql(issuesQuery)]);
   const projects = projectsResult.data?.team?.projects?.nodes || [];
   const allIssues = issuesResult.data?.team?.issues?.nodes || [];
 
   let milestone = null;
   let projectName = '';
   for (const p of projects) {
-    const m = p.projectMilestones?.nodes?.find(m =>
-      m.name.toLowerCase().includes(milestoneName.toLowerCase())
-    );
+    const m = p.projectMilestones?.nodes?.find(m => m.name.toLowerCase().includes(milestoneName.toLowerCase()));
     if (m) {
       milestone = m;
       projectName = p.name;
@@ -1762,9 +1863,12 @@ async function cmdMilestoneShow(args) {
 
 async function cmdMilestoneCreate(args) {
   const opts = parseArgs(args, {
-    name: 'string', n: 'string',
-    project: 'string', p: 'string',
-    description: 'string', d: 'string',
+    name: 'string',
+    n: 'string',
+    project: 'string',
+    p: 'string',
+    description: 'string',
+    d: 'string',
     'target-date': 'string',
   });
 
@@ -1860,10 +1964,7 @@ async function cmdRoadmap(args) {
     }
   }`;
 
-  const [projectsResult, issuesResult] = await Promise.all([
-    gql(projectsQuery),
-    gql(issuesQuery)
-  ]);
+  const [projectsResult, issuesResult] = await Promise.all([gql(projectsQuery), gql(issuesQuery)]);
 
   let projects = projectsResult.data?.team?.projects?.nodes || [];
   const allIssues = issuesResult.data?.team?.issues?.nodes || [];
@@ -1894,7 +1995,9 @@ async function cmdRoadmap(args) {
     const priorityStr = project.priority > 0 ? ` [P${project.priority}]` : '';
 
     console.log(colors.bold(`${project.name}${priorityStr}${dateStr}`));
-    console.log(`  ${colors.green(`✓ ${done}`)} done | ${colors.yellow(`→ ${inProgress}`)} in progress | ${colors.gray(`○ ${backlog}`)} backlog`);
+    console.log(
+      `  ${colors.green(`✓ ${done}`)} done | ${colors.yellow(`→ ${inProgress}`)} in progress | ${colors.gray(`○ ${backlog}`)} backlog`
+    );
 
     // Show milestones with their issues
     if (milestones.length > 0) {
@@ -1906,16 +2009,14 @@ async function cmdRoadmap(args) {
         const mIssues = issues.filter(i => i.projectMilestone?.id === m.id);
         const mDone = mIssues.filter(i => i.state.type === 'completed').length;
         const mTotal = mIssues.length;
-        const statusIcon = m.status === 'completed' ? colors.green('✓') :
-                          m.status === 'inProgress' ? colors.yellow('→') : '○';
+        const statusIcon =
+          m.status === 'completed' ? colors.green('✓') : m.status === 'inProgress' ? colors.yellow('→') : '○';
         const targetStr = m.targetDate ? ` (${m.targetDate})` : '';
 
         console.log(`  ${statusIcon} ${m.name}${targetStr}: ${mDone}/${mTotal} done`);
 
         // Show non-completed issues in this milestone
-        const issuesInMilestone = mIssues.filter(i =>
-          !['completed', 'canceled'].includes(i.state.type)
-        );
+        const issuesInMilestone = mIssues.filter(i => !['completed', 'canceled'].includes(i.state.type));
 
         // Sort by priority then sortOrder
         issuesInMilestone.sort((a, b) => {
@@ -1934,9 +2035,8 @@ async function cmdRoadmap(args) {
     }
 
     // Show issues not in any milestone
-    const unmilestonedIssues = issues.filter(i =>
-      !i.projectMilestone &&
-      !['completed', 'canceled'].includes(i.state.type)
+    const unmilestonedIssues = issues.filter(
+      i => !i.projectMilestone && !['completed', 'canceled'].includes(i.state.type)
     );
 
     if (unmilestonedIssues.length > 0 && milestones.length > 0) {
@@ -1996,14 +2096,16 @@ async function cmdProjectsReorder(args) {
   const mutations = [];
 
   for (let i = 0; i < orderedProjects.length; i++) {
-    const newSortOrder = baseSort - (i * 1000);
-    mutations.push(gql(`
+    const newSortOrder = baseSort - i * 1000;
+    mutations.push(
+      gql(`
       mutation {
         projectUpdate(id: "${orderedProjects[i].id}", input: { sortOrder: ${newSortOrder} }) {
           success
         }
       }
-    `));
+    `)
+    );
   }
 
   await Promise.all(mutations);
@@ -2138,14 +2240,16 @@ async function cmdMilestonesReorder(args) {
   const mutations = [];
 
   for (let i = 0; i < orderedMilestones.length; i++) {
-    const newSortOrder = baseSort - (i * 1000);
-    mutations.push(gql(`
+    const newSortOrder = baseSort - i * 1000;
+    mutations.push(
+      gql(`
       mutation {
         projectMilestoneUpdate(id: "${orderedMilestones[i].id}", input: { sortOrder: ${newSortOrder} }) {
           success
         }
       }
-    `));
+    `)
+    );
   }
 
   await Promise.all(mutations);
@@ -2190,9 +2294,7 @@ async function cmdMilestoneMove(args) {
   let milestone = null;
   let projectMilestones = [];
   for (const p of projects) {
-    const m = p.projectMilestones?.nodes?.find(m =>
-      m.name.toLowerCase().includes(milestoneName.toLowerCase())
-    );
+    const m = p.projectMilestones?.nodes?.find(m => m.name.toLowerCase().includes(milestoneName.toLowerCase()));
     if (m) {
       milestone = m;
       projectMilestones = p.projectMilestones.nodes;
@@ -2206,9 +2308,7 @@ async function cmdMilestoneMove(args) {
     process.exit(1);
   }
 
-  const target = projectMilestones.find(m =>
-    m.name.toLowerCase().includes((beforeName || afterName).toLowerCase())
-  );
+  const target = projectMilestones.find(m => m.name.toLowerCase().includes((beforeName || afterName).toLowerCase()));
 
   if (!target) {
     console.error(colors.red(`Target milestone not found: ${beforeName || afterName}`));
@@ -2280,14 +2380,16 @@ async function cmdIssuesReorder(args) {
   const mutations = [];
 
   for (let i = 0; i < orderedIssues.length; i++) {
-    const newSortOrder = baseSort - (i * 1000);
-    mutations.push(gql(`
+    const newSortOrder = baseSort - i * 1000;
+    mutations.push(
+      gql(`
       mutation {
         issueUpdate(id: "${orderedIssues[i].identifier}", input: { sortOrder: ${newSortOrder} }) {
           success
         }
       }
-    `));
+    `)
+    );
   }
 
   await Promise.all(mutations);
@@ -2393,18 +2495,18 @@ async function cmdLabels() {
     return;
   }
 
-  const rows = labels.map(l => [
-    l.name,
-    l.description || '-'
-  ]);
+  const rows = labels.map(l => [l.name, l.description || '-']);
   console.log(formatTable(rows));
 }
 
 async function cmdLabelCreate(args) {
   const opts = parseArgs(args, {
-    name: 'string', n: 'string',
-    description: 'string', d: 'string',
-    color: 'string', c: 'string',
+    name: 'string',
+    n: 'string',
+    description: 'string',
+    d: 'string',
+    color: 'string',
+    c: 'string',
   });
 
   const name = opts.name || opts.n || opts._[0];
@@ -2451,8 +2553,10 @@ async function cmdLabelCreate(args) {
 
 async function cmdAlias(args) {
   const opts = parseArgs(args, {
-    list: 'boolean', l: 'boolean',
-    remove: 'string', r: 'string',
+    list: 'boolean',
+    l: 'boolean',
+    remove: 'string',
+    r: 'string',
   });
 
   const showList = opts.list || opts.l;
@@ -2482,7 +2586,7 @@ async function cmdAlias(args) {
     const projects = result.data?.team?.projects?.nodes || [];
 
     // Check if alias target matches a project (using partial match)
-    const matchesProject = (target) => {
+    const matchesProject = target => {
       const lowerTarget = target.toLowerCase();
       return projects.some(p => p.name.toLowerCase().includes(lowerTarget));
     };
@@ -2523,9 +2627,9 @@ async function cmdAlias(args) {
 function slugify(text) {
   return text
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')  // Replace non-alphanumeric with dashes
-    .replace(/^-+|-+$/g, '')      // Trim leading/trailing dashes
-    .slice(0, 50);                // Limit length
+    .replace(/[^a-z0-9]+/g, '-') // Replace non-alphanumeric with dashes
+    .replace(/^-+|-+$/g, '') // Trim leading/trailing dashes
+    .slice(0, 50); // Limit length
 }
 
 function detectPackageManager(dir) {
@@ -2554,7 +2658,10 @@ function copyWorktreeIncludes(repoRoot, worktreePath) {
 
     // Check if the file/dir is gitignored (only copy if it is)
     try {
-      execSync(`git check-ignore -q "${pattern}"`, { cwd: repoRoot, stdio: 'pipe' });
+      execSync(`git check-ignore -q "${pattern}"`, {
+        cwd: repoRoot,
+        stdio: 'pipe',
+      });
       // If we get here, the file IS ignored - copy it
       const destDir = join(destPath, '..');
       if (!existsSync(destDir)) {
@@ -2583,7 +2690,9 @@ async function cmdNext(args) {
   // Get repo info
   let repoRoot;
   try {
-    repoRoot = execSync('git rev-parse --show-toplevel', { encoding: 'utf-8' }).trim();
+    repoRoot = execSync('git rev-parse --show-toplevel', {
+      encoding: 'utf-8',
+    }).trim();
   } catch (err) {
     console.error(colors.red('Error: Not in a git repository'));
     process.exit(1);
@@ -2630,10 +2739,7 @@ async function cmdNext(args) {
   }
 
   // Filter to unblocked, non-completed issues
-  issues = issues.filter(i =>
-    !['completed', 'canceled'].includes(i.state.type) &&
-    !blocked.has(i.identifier)
-  );
+  issues = issues.filter(i => !['completed', 'canceled'].includes(i.state.type) && !blocked.has(i.identifier));
 
   // Sort: assigned to you first, then by identifier
   issues.sort((a, b) => {
@@ -2704,14 +2810,14 @@ async function cmdNext(args) {
   try {
     execSync(`git worktree add "${worktreePath}" -b "${branchName}"`, {
       cwd: repoRoot,
-      stdio: 'inherit'
+      stdio: 'inherit',
     });
   } catch (err) {
     // Branch might already exist, try without -b
     try {
       execSync(`git worktree add "${worktreePath}" "${branchName}"`, {
         cwd: repoRoot,
-        stdio: 'inherit'
+        stdio: 'inherit',
       });
     } catch (err2) {
       console.error(colors.red(`Failed to create worktree: ${err2.message}`));
@@ -2795,7 +2901,9 @@ async function cmdBranch(args) {
 
 function getIssueFromBranch() {
   try {
-    const branch = execSync('git branch --show-current', { encoding: 'utf-8' }).trim();
+    const branch = execSync('git branch --show-current', {
+      encoding: 'utf-8',
+    }).trim();
     // Extract issue ID from branch name (e.g., ISSUE-12-some-title -> ISSUE-12)
     const match = branch.match(/^([A-Z]+-\d+)/);
     return match ? match[1] : null;
@@ -2807,7 +2915,9 @@ function getIssueFromBranch() {
 function isInWorktree() {
   try {
     // In a worktree, git rev-parse --git-dir returns something like /path/to/main/.git/worktrees/branch-name
-    const gitDir = execSync('git rev-parse --git-dir', { encoding: 'utf-8' }).trim();
+    const gitDir = execSync('git rev-parse --git-dir', {
+      encoding: 'utf-8',
+    }).trim();
     return gitDir.includes('/worktrees/');
   } catch (err) {
     return false;
@@ -2817,7 +2927,9 @@ function isInWorktree() {
 function getMainRepoPath() {
   try {
     // Get the path to the main working tree
-    const worktreeList = execSync('git worktree list --porcelain', { encoding: 'utf-8' });
+    const worktreeList = execSync('git worktree list --porcelain', {
+      encoding: 'utf-8',
+    });
     const lines = worktreeList.split('\n');
     // First worktree entry is the main repo
     for (const line of lines) {
@@ -2880,11 +2992,14 @@ async function cmdDone(args) {
     const doneState = states.find(s => s.type === 'completed');
 
     if (doneState) {
-      const closeResult = await gql(`
+      const closeResult = await gql(
+        `
         mutation($id: String!, $input: IssueUpdateInput!) {
           issueUpdate(id: $id, input: $input) { success }
         }
-      `, { id: issueId, input: { stateId: doneState.id } });
+      `,
+        { id: issueId, input: { stateId: doneState.id } }
+      );
 
       if (closeResult.data?.issueUpdate?.success) {
         console.log(colors.green(`✓ Closed ${issueId}`));
@@ -2900,7 +3015,9 @@ async function cmdDone(args) {
   if (inWorktree) {
     const currentDir = process.cwd();
     const mainRepo = getMainRepoPath();
-    const branchName = execSync('git branch --show-current', { encoding: 'utf-8' }).trim();
+    const branchName = execSync('git branch --show-current', {
+      encoding: 'utf-8',
+    }).trim();
 
     console.log(colors.gray(`\nWorktree detected: ${currentDir}`));
 
@@ -2925,207 +3042,6 @@ async function cmdDone(args) {
 }
 
 // ============================================================================
-// STANDUP
-// ============================================================================
-
-function getYesterdayDate() {
-  const date = new Date();
-  date.setDate(date.getDate() - 1);
-  return date.toISOString().split('T')[0];
-}
-
-function getTodayDate() {
-  return new Date().toISOString().split('T')[0];
-}
-
-async function cmdStandup(args) {
-  const opts = parseArgs(args, {
-    'no-github': 'boolean',
-  });
-
-  const skipGitHub = opts['no-github'];
-  const yesterday = getYesterdayDate();
-
-  // Get current user
-  const viewerResult = await gql('{ viewer { id name } }');
-  const viewer = viewerResult.data?.viewer;
-  if (!viewer) {
-    console.error(colors.red('Error: Could not fetch user info'));
-    process.exit(1);
-  }
-
-  console.log(colors.bold(`\nStandup for ${viewer.name}\n`));
-  console.log(colors.gray(`─────────────────────────────────────────\n`));
-
-  // Fetch issues with completion info
-  const query = `{
-    team(id: "${TEAM_KEY}") {
-      issues(first: 100) {
-        nodes {
-          identifier
-          title
-          state { name type }
-          assignee { id }
-          completedAt
-          relations(first: 20) {
-            nodes {
-              type
-              relatedIssue { identifier state { type } }
-            }
-          }
-        }
-      }
-    }
-  }`;
-
-  const result = await gql(query);
-  const issues = result.data?.team?.issues?.nodes || [];
-
-  // Issues completed yesterday (by me)
-  const completedYesterday = issues.filter(i => {
-    if (i.assignee?.id !== viewer.id) return false;
-    if (!i.completedAt) return false;
-    const completedDate = i.completedAt.split('T')[0];
-    return completedDate === yesterday;
-  });
-
-  // Issues in progress (assigned to me)
-  const inProgress = issues.filter(i =>
-    i.assignee?.id === viewer.id &&
-    i.state.type === 'started'
-  );
-
-  // Blocked issues (assigned to me)
-  const blockedIds = new Set();
-  for (const issue of issues) {
-    for (const rel of issue.relations?.nodes || []) {
-      if (rel.type === 'blocks' && rel.relatedIssue.state.type !== 'completed') {
-        blockedIds.add(rel.relatedIssue.identifier);
-      }
-    }
-  }
-  const blocked = issues.filter(i =>
-    i.assignee?.id === viewer.id &&
-    blockedIds.has(i.identifier)
-  );
-
-  // Display Linear info
-  console.log(colors.bold('Yesterday (completed):'));
-  if (completedYesterday.length === 0) {
-    console.log(colors.gray('  No issues completed'));
-  } else {
-    for (const issue of completedYesterday) {
-      console.log(`  ${colors.green('✓')} ${issue.identifier}: ${issue.title}`);
-    }
-  }
-
-  console.log('');
-  console.log(colors.bold('Today (in progress):'));
-  if (inProgress.length === 0) {
-    console.log(colors.gray('  No issues in progress'));
-  } else {
-    for (const issue of inProgress) {
-      console.log(`  → ${issue.identifier}: ${issue.title}`);
-    }
-  }
-
-  if (blocked.length > 0) {
-    console.log('');
-    console.log(colors.bold('Blocked:'));
-    for (const issue of blocked) {
-      console.log(`  ${colors.red('⊘')} ${issue.identifier}: ${issue.title}`);
-    }
-  }
-
-  // GitHub activity (cross-repo)
-  if (!skipGitHub) {
-    console.log('');
-    console.log(colors.gray(`─────────────────────────────────────────\n`));
-    console.log(colors.bold('GitHub Activity (yesterday):'));
-
-    let hasActivity = false;
-    let ghAvailable = true;
-
-    // Get commits across all repos
-    try {
-      const commitsJson = execSync(
-        `gh search commits --author=@me --committer-date=${yesterday} --json sha,commit,repository --limit 50`,
-        { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
-      );
-      const commits = JSON.parse(commitsJson);
-
-      if (commits.length > 0) {
-        hasActivity = true;
-        const byRepo = {};
-        for (const c of commits) {
-          const repo = c.repository?.fullName || 'unknown';
-          if (!byRepo[repo]) byRepo[repo] = [];
-          const msg = c.commit?.message?.split('\n')[0] || c.sha.slice(0, 7);
-          byRepo[repo].push(`${c.sha.slice(0, 7)} ${msg}`);
-        }
-
-        console.log(`\n  Commits (${commits.length}):`);
-        for (const [repo, repoCommits] of Object.entries(byRepo)) {
-          console.log(`    ${colors.bold(repo)} (${repoCommits.length}):`);
-          for (const commit of repoCommits) {
-            console.log(`      ${commit}`);
-          }
-        }
-      }
-    } catch (err) {
-      ghAvailable = false;
-      console.log(colors.gray('  (gh CLI not available - install gh for GitHub activity)'));
-    }
-
-    // Get PRs across all repos
-    if (ghAvailable) {
-      try {
-        const mergedJson = execSync(
-          `gh search prs --author=@me --merged-at=${yesterday} --json number,title,repository --limit 20`,
-          { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
-        );
-        const mergedPrs = JSON.parse(mergedJson).map(pr => ({ ...pr, prStatus: 'merged' }));
-
-        const createdJson = execSync(
-          `gh search prs --author=@me --created=${yesterday} --state=open --json number,title,repository --limit 20`,
-          { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
-        );
-        const createdPrs = JSON.parse(createdJson).map(pr => ({ ...pr, prStatus: 'open' }));
-
-        // Deduplicate (a PR created and merged same day appears in both)
-        const seen = new Set();
-        const allPrs = [];
-        for (const pr of [...mergedPrs, ...createdPrs]) {
-          const key = `${pr.repository?.fullName}#${pr.number}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            allPrs.push(pr);
-          }
-        }
-
-        if (allPrs.length > 0) {
-          hasActivity = true;
-          console.log(`\n  Pull Requests:`);
-          for (const pr of allPrs) {
-            const repo = pr.repository?.name || '';
-            const status = pr.prStatus === 'merged' ? colors.green('merged') : colors.yellow('open');
-            console.log(`    ${colors.gray(repo + '#')}${pr.number} ${pr.title} [${status}]`);
-          }
-        }
-      } catch (err) {
-        // gh search error
-      }
-    }
-
-    if (!hasActivity && ghAvailable) {
-      console.log(colors.gray('  No GitHub activity yesterday'));
-    }
-  }
-
-  console.log('');
-}
-
-// ============================================================================
 // AUTH
 // ============================================================================
 
@@ -3147,9 +3063,9 @@ async function cmdLogin(args) {
   console.log('');
 
   // Explain and prompt before opening browser
-  console.log('To authenticate, you\'ll need a Linear API key.');
-  console.log(colors.gray('(Create a new personal API key if you don\'t have one)\n'));
-  await prompt('Press Enter to open Linear\'s API settings in your browser...');
+  console.log("To authenticate, you'll need a Linear API key.");
+  console.log(colors.gray("(Create a new personal API key if you don't have one)\n"));
+  await prompt("Press Enter to open Linear's API settings in your browser...");
 
   openBrowser('https://linear.app/settings/api');
 
@@ -3206,14 +3122,17 @@ async function cmdLogin(args) {
     let teamKey = await prompt(`Team key [${suggestedKey}]: `);
     teamKey = (teamKey || suggestedKey).toUpperCase();
 
-    const createResult = await gql(`
+    const createResult = await gql(
+      `
       mutation($input: TeamCreateInput!) {
         teamCreate(input: $input) {
           success
           team { key name }
         }
       }
-    `, { input: { name: teamName, key: teamKey } });
+    `,
+      { input: { name: teamName, key: teamKey } }
+    );
 
     if (createResult.data?.teamCreate?.success) {
       selectedKey = teamKey;
@@ -3363,6 +3282,7 @@ ISSUES:
     --uncheck <text>         Uncheck a checkbox item (fuzzy match)
     --blocks <id>            Add blocking relation (repeatable)
     --blocked-by <id>        Add blocked-by relation (repeatable)
+    --link-pr [url]          Link a GitHub PR (repeatable, auto-detects via gh if no URL)
   issue close <id>           Mark issue as done
   issue comment <id> <body>  Add a comment
   issue move <id>            Move issue in sort order
@@ -3429,8 +3349,6 @@ WORKFLOW:
   done [id]                  Complete work on an issue
     --no-close               Don't close the issue in Linear
     --keep-branch            Don't suggest deleting the branch
-  standup                    Show daily standup summary
-    --no-github              Skip GitHub activity
 
   Shell setup (add to ~/.zshrc):
     lnext() { eval "$(linear next "$@")"; }
@@ -3507,13 +3425,27 @@ async function main() {
         const subcmd = args[1];
         const subargs = args.slice(2);
         switch (subcmd) {
-          case 'show': await cmdIssueShow(subargs); break;
-          case 'create': await cmdIssueCreate(subargs); break;
-          case 'update': await cmdIssueUpdate(subargs); break;
-          case 'start': await cmdIssueStart(subargs); break;
-          case 'close': await cmdIssueClose(subargs); break;
-          case 'comment': await cmdIssueComment(subargs); break;
-          case 'move': await cmdIssueMove(subargs); break;
+          case 'show':
+            await cmdIssueShow(subargs);
+            break;
+          case 'create':
+            await cmdIssueCreate(subargs);
+            break;
+          case 'update':
+            await cmdIssueUpdate(subargs);
+            break;
+          case 'start':
+            await cmdIssueStart(subargs);
+            break;
+          case 'close':
+            await cmdIssueClose(subargs);
+            break;
+          case 'comment':
+            await cmdIssueComment(subargs);
+            break;
+          case 'move':
+            await cmdIssueMove(subargs);
+            break;
           default:
             console.error(`Unknown issue command: ${subcmd}`);
             process.exit(1);
@@ -3535,10 +3467,18 @@ async function main() {
         const subcmd = args[1];
         const subargs = args.slice(2);
         switch (subcmd) {
-          case 'show': await cmdProjectShow(subargs); break;
-          case 'create': await cmdProjectCreate(subargs); break;
-          case 'complete': await cmdProjectComplete(subargs); break;
-          case 'move': await cmdProjectMove(subargs); break;
+          case 'show':
+            await cmdProjectShow(subargs);
+            break;
+          case 'create':
+            await cmdProjectCreate(subargs);
+            break;
+          case 'complete':
+            await cmdProjectComplete(subargs);
+            break;
+          case 'move':
+            await cmdProjectMove(subargs);
+            break;
           case 'open': {
             const name = resolveAlias(subargs[0]);
             if (!name) {
@@ -3583,9 +3523,15 @@ async function main() {
         const subcmd = args[1];
         const subargs = args.slice(2);
         switch (subcmd) {
-          case 'show': await cmdMilestoneShow(subargs); break;
-          case 'create': await cmdMilestoneCreate(subargs); break;
-          case 'move': await cmdMilestoneMove(subargs); break;
+          case 'show':
+            await cmdMilestoneShow(subargs);
+            break;
+          case 'create':
+            await cmdMilestoneCreate(subargs);
+            break;
+          case 'move':
+            await cmdMilestoneMove(subargs);
+            break;
           case 'open': {
             const name = resolveAlias(subargs[0]);
             if (!name) {
@@ -3628,7 +3574,9 @@ async function main() {
         const subcmd = args[1];
         const subargs = args.slice(2);
         switch (subcmd) {
-          case 'create': await cmdLabelCreate(subargs); break;
+          case 'create':
+            await cmdLabelCreate(subargs);
+            break;
           default:
             console.error(`Unknown label command: ${subcmd}`);
             process.exit(1);
@@ -3650,10 +3598,6 @@ async function main() {
       case 'done':
         checkAuth();
         await cmdDone(args.slice(1));
-        break;
-      case 'standup':
-        checkAuth();
-        await cmdStandup(args.slice(1));
         break;
       default:
         console.error(`Unknown command: ${cmd}`);

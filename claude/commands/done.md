@@ -24,17 +24,21 @@ Help the developer wrap up their work on the current Linear issue.
 ## After Selection
 
 ### If they want to create a PR:
+
 1. Run `gh pr create --title "ISSUE-12: Issue title" --body "..."` with a summary
 2. Then proceed to closing if requested
 
 ### If they want to add notes:
+
 1. Ask what notes to add
 2. Run `linear issue update ISSUE-12 --append "..."` with the notes
 
 ### If they want to close:
+
 1. Run `linear done ISSUE-12` to close the issue
 
 ### Worktree cleanup:
+
 If in a worktree, `linear done` will output commands to clean up. Let the user know they can copy those commands or run them manually.
 
 ## Example Flow

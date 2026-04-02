@@ -11,8 +11,8 @@ const dest = join(homedir(), '.claude');
 let removedCount = 0;
 try {
   const files = readdirSync(src, { recursive: true, withFileTypes: true })
-    .filter((e) => e.isFile())
-    .map((e) => relative(src, join(e.parentPath, e.name)));
+    .filter(e => e.isFile())
+    .map(e => relative(src, join(e.parentPath, e.name)));
 
   for (const file of files) {
     const filePath = join(dest, file);

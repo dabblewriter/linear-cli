@@ -9,6 +9,7 @@ npm install -g @dabble/linear-cli
 ```
 
 This installs:
+
 - The `linear` command globally
 - A Claude Code skill to `~/.claude/skills/linear-cli.md`
 - The `/next` command to `~/.claude/commands/next.md`
@@ -42,6 +43,7 @@ linear issue update ISSUE-1 --append "Found the root cause..."
 ## Commands
 
 ### Authentication
+
 ```bash
 linear login              # Interactive setup (prompts for location)
 linear logout             # Remove config
@@ -49,6 +51,7 @@ linear whoami             # Show current user and team
 ```
 
 ### Issues
+
 ```bash
 linear issues                        # Default: backlog + todo
 linear issues --unblocked           # Ready to work on
@@ -69,11 +72,13 @@ linear issue comment ISSUE-1 "Comment"
 ```
 
 ### Git Integration
+
 ```bash
 linear branch ISSUE-1                # Create branch: ISSUE-1-issue-title
 ```
 
 ### Worktrees (Parallel Development)
+
 ```bash
 linear next                         # Pick an issue, create worktree, start Claude
 linear next --dry-run               # Preview what would happen
@@ -86,11 +91,13 @@ linear standup --no-github          # Linear only
 The `next` command creates isolated git worktrees for each issue, making it easy to work on multiple issues in parallel with Claude Code. Worktrees are stored in `~/.claude-worktrees/<repo>/<branch>`.
 
 **Shell setup** (add to `~/.zshrc` or `~/.bashrc`):
+
 ```bash
 lnext() { eval "$(linear next "$@")"; }
 ```
 
 Then use `lnext` to:
+
 1. See a list of unblocked issues
 2. Pick one interactively
 3. Create a git worktree in `~/.claude-worktrees/`
@@ -100,18 +107,21 @@ Then use `lnext` to:
 7. Launch Claude in plan mode with the issue context
 
 **`.worktreeinclude` file**: List gitignored files/directories that should be copied to new worktrees:
+
 ```
 .linear
 .env
 ```
 
 ### Labels
+
 ```bash
 linear labels                       # List all labels
 linear label create "bug" --color "#FF0000"
 ```
 
 ### Projects
+
 ```bash
 linear projects                     # Active projects
 linear projects --all               # Include completed
@@ -123,6 +133,7 @@ linear project complete "Phase 1"   # Mark done
 ## Configuration
 
 Config is loaded in order:
+
 1. `./.linear` (project-specific)
 2. `~/.linear` (global fallback)
 3. Environment variables

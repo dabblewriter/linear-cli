@@ -22,6 +22,7 @@ Skip straight to starting work on that issue (see "Starting Work on an Issue" be
 ### Presenting Options
 
 Present interactive options:
+
 - Up to **3 issues** (CLI already sorts yours first)
 - **Always** include "Product planning" as an option
 - If >3 issues, note how many more
@@ -39,6 +40,7 @@ When the user selects an issue (or provides one directly via `/next ISSUE-12`):
 ## If they choose "Product planning"
 
 Ask what they want to focus on:
+
 - Review and prioritize backlog
 - Brainstorm new features
 - Plan the next phase

@@ -17,8 +17,8 @@ try {
   cpSync(src, dest, { recursive: true });
 
   const files = readdirSync(src, { recursive: true, withFileTypes: true })
-    .filter((e) => e.isFile())
-    .map((e) => relative(src, join(e.parentPath, e.name)));
+    .filter(e => e.isFile())
+    .map(e => relative(src, join(e.parentPath, e.name)));
 
   console.log(`\x1b[32m✓\x1b[0m Installed Claude files to ~/.claude/`);
   for (const file of files) {
@@ -49,8 +49,8 @@ try {
   const skillsDir = join(src, 'skills');
   if (existsSync(skillsDir)) {
     const skills = readdirSync(skillsDir, { withFileTypes: true })
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name);
+      .filter(e => e.isDirectory())
+      .map(e => e.name);
 
     for (const skill of skills) {
       permissions.push(`Skill(${skill})`);

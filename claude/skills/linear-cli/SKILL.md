@@ -17,6 +17,7 @@ linear login
 ```
 
 This will:
+
 1. Ask where to save credentials (project or global)
 2. Open Linear API settings in your browser
 3. Prompt you to paste your API key
@@ -124,6 +125,8 @@ linear issue update ISSUE-1 --milestone "Beta"
 linear issue update ISSUE-1 --append "Notes..."
 linear issue update ISSUE-1 --check "validation" # Check off a todo item
 linear issue update ISSUE-1 --blocks ISSUE-2 --blocks ISSUE-3  # Repeatable
+linear issue update ISSUE-1 --link-pr                         # Link current branch's PR (auto-detect via gh)
+linear issue update ISSUE-1 --link-pr https://github.com/org/repo/pull/42  # Link specific PR
 linear issue close ISSUE-1
 linear issue comment ISSUE-1 "Comment text"
 
@@ -169,13 +172,13 @@ linear branch ISSUE-1            # Create branch: ISSUE-1-issue-title
 
 Use t-shirt sizes for estimates. Always use `--estimate` (not `-e`) for clarity.
 
-| Size | Meaning |
-|------|---------|
-| XS | Trivial, < 1 hour |
-| S | Small, couple hours |
-| M | Medium, a day or so |
-| L | Large, multi-day - consider breaking down |
-| XL | Very large - should definitely break down |
+| Size | Meaning                                   |
+| ---- | ----------------------------------------- |
+| XS   | Trivial, < 1 hour                         |
+| S    | Small, couple hours                       |
+| M    | Medium, a day or so                       |
+| L    | Large, multi-day - consider breaking down |
+| XL   | Very large - should definitely break down |
 
 ```bash
 # Create with estimate (use long flags for clarity)
@@ -205,7 +208,9 @@ gh pr create --title "ISSUE-5: Add caching layer"
 ## Workflow Guidelines
 
 ### Setting context
+
 When working on a specific project/milestone, set it as default to avoid repeating flags:
+
 ```bash
 linear project open "Phase 1"    # All commands now default to Phase 1
 linear milestone open "Sprint 3" # And to Sprint 3 milestone
@@ -215,6 +220,7 @@ linear project close             # Done? Clear the context
 ```
 
 ### Getting oriented
+
 ```bash
 linear roadmap                  # See all projects, milestones, progress
 linear issues --project "P1"    # Issues in a specific project
@@ -222,6 +228,7 @@ linear issues --milestone "M1"  # Issues in a specific milestone
 ```
 
 ### Starting work on an issue
+
 ```bash
 linear issues --unblocked       # Find what's ready
 linear issue show ISSUE-2        # Review it (shows parent context)
@@ -230,6 +237,7 @@ linear branch ISSUE-2            # Create git branch
 ```
 
 ### When you hit a blocker
+
 If work cannot continue due to a dependency or external factor:
 
 ```bash
@@ -243,6 +251,7 @@ linear issue update ISSUE-3 --blocks ISSUE-5
 This removes ISSUE-5 from `--unblocked` results until the blocker is resolved.
 
 ### When a task is larger than expected
+
 If you discover an M issue is actually L/XL, break it down:
 
 ```bash
@@ -256,6 +265,7 @@ linear issue start ISSUE-6
 ```
 
 ### Checklists vs. sub-issues
+
 Use description checklists for lightweight steps within a single issue. Use sub-issues when items need their own status, assignee, or estimate.
 
 ```bash
@@ -276,6 +286,7 @@ linear issue create --title "Add login endpoint" --parent ISSUE-5 --estimate S
 Prefer checklists when the items are small and don't need independent tracking. Prefer sub-issues when you'd want to assign, estimate, or block on them individually. Use `--check` to mark items complete as you finish them.
 
 ### Completing work
+
 After finishing implementation, ask the developer if they want to close the issue:
 
 ```bash
@@ -286,6 +297,7 @@ linear issue close ISSUE-5
 Do not auto-close issues. Let the developer review the work first.
 
 ### Adding notes while working
+
 ```bash
 linear issue update ISSUE-2 --append "## Notes\n\nDiscovered X, trying Y approach..."
 # or for quick updates
@@ -293,6 +305,7 @@ linear issue comment ISSUE-2 "Found the root cause in auth.ts:142"
 ```
 
 ### Organizing with milestones
+
 Milestones group related issues within a project:
 
 ```bash
@@ -308,6 +321,7 @@ linear milestones reorder "Alpha" "Beta" "Stable" --project "Phase 1"
 ```
 
 ### Completing a phase
+
 ```bash
 linear issue close ISSUE-7       # Close remaining issues
 linear project complete "Phase 1"
