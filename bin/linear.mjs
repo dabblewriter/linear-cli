@@ -2831,6 +2831,7 @@ async function cmdNext(args) {
           identifier
           title
           priority
+          sortOrder
           state { name type }
           project { name }
           assignee { id name }
@@ -2861,13 +2862,16 @@ async function cmdNext(args) {
   // Filter to unblocked, non-completed issues
   issues = issues.filter(i => !['completed', 'canceled'].includes(i.state.type) && !blocked.has(i.identifier));
 
-  // Sort: assigned to you first, then by identifier
+  // Sort: assigned to you first, then by priority, then by board sort order
   issues.sort((a, b) => {
     const aIsMine = a.assignee?.id === viewerId;
     const bIsMine = b.assignee?.id === viewerId;
     if (aIsMine && !bIsMine) return -1;
     if (!aIsMine && bIsMine) return 1;
-    return a.identifier.localeCompare(b.identifier);
+    const aPri = a.priority || 5;
+    const bPri = b.priority || 5;
+    if (aPri !== bPri) return aPri - bPri;
+    return (b.sortOrder || 0) - (a.sortOrder || 0);
   });
 
   // Limit to 10 issues

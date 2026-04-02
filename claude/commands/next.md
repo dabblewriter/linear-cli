@@ -28,11 +28,13 @@ Present interactive options:
 - If >3 issues, note how many more
 - User can always type a specific issue ID
 
+When the user selects an issue or types an issue ID, proceed to "Starting Work on an Issue" below.
+
 ## Starting Work on an Issue
 
-When the user selects an issue (or provides one directly via `/next ISSUE-12`):
+When the user selects an issue, types an issue ID, or provides one directly via `/next ISSUE-12`:
 
-1. Run `linear issue start <id>` to assign and set In Progress
+1. **ALWAYS** run `linear issue start <id>` first — this assigns the issue to you and sets it to In Progress. Never skip this step.
 2. Run `linear branch <id>` to create a git branch
 3. Run `linear issue show <id>` to display full context
 4. **Enter plan mode** to explore the codebase and design an implementation approach
