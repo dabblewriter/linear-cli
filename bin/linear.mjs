@@ -1176,14 +1176,12 @@ async function cmdIssueUpdate(args) {
     uncheck: 'string',
     blocks: 'array',
     'blocked-by': 'array',
-    'link-pr': 'optionalArray',
-    link: 'array',
+    link: 'optionalArray',
   });
 
   const blocksIssues = opts.blocks || [];
   const blockedByIssues = opts['blocked-by'] || [];
-  const linkPrs = opts['link-pr'] || [];
-  const linkUrls = opts.link || [];
+  const linkEntries = opts.link || [];
   const projectName = resolveAlias(opts.project || opts.p);
   const milestoneName = resolveAlias(opts.milestone);
   const priorityName = (opts.priority || '').toLowerCase();
@@ -1382,10 +1380,9 @@ async function cmdIssueUpdate(args) {
 
   // Handle blocking relations (can be set even without other updates)
   const hasRelationUpdates = blocksIssues.length > 0 || blockedByIssues.length > 0;
-  const hasLinkPrs = linkPrs.length > 0;
-  const hasLinks = linkUrls.length > 0;
+  const hasLinks = linkEntries.length > 0;
 
-  if (Object.keys(input).length === 0 && !hasRelationUpdates && !hasLinkPrs && !hasLinks) {
+  if (Object.keys(input).length === 0 && !hasRelationUpdates && !hasLinks) {
     console.error(colors.red('Error: No updates specified'));
     process.exit(1);
   }
@@ -1437,12 +1434,12 @@ async function cmdIssueUpdate(args) {
     }
   }
 
-  // Link URLs (--link-pr and --link)
-  // Collect all URLs to link, resolving --link-pr auto-detect entries
+  // Link URLs (--link with optional auto-detect)
   const allLinks = [];
 
-  for (const entry of linkPrs) {
+  for (const entry of linkEntries) {
     if (entry === true) {
+      // No URL given — auto-detect current branch's PR via gh
       try {
         const json = execSync('gh pr view --json url', {
           encoding: 'utf-8',
@@ -1463,7 +1460,6 @@ async function cmdIssueUpdate(args) {
       allLinks.push(entry);
     }
   }
-  allLinks.push(...linkUrls);
 
   if (allLinks.length > 0) {
     const prMutation = `
@@ -3407,8 +3403,7 @@ ISSUES:
     --uncheck <text>         Uncheck a checkbox item (fuzzy match)
     --blocks <id>            Add blocking relation (repeatable)
     --blocked-by <id>        Add blocked-by relation (repeatable)
-    --link-pr [url]          Link a GitHub PR (repeatable, auto-detects via gh if no URL)
-    --link <url>             Link a URL as a resource (repeatable)
+    --link [url]             Link a URL (repeatable, auto-detects PR via gh if no URL)
   issue attach <id> <url>    Attach a URL as a resource (alias for update --link)
   issue close <id>           Mark issue as done
   issue comment <id> <body>  Add a comment

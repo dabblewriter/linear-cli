@@ -125,10 +125,9 @@ linear issue update ISSUE-1 --milestone "Beta"
 linear issue update ISSUE-1 --append "Notes..."
 linear issue update ISSUE-1 --check "validation" # Check off a todo item
 linear issue update ISSUE-1 --blocks ISSUE-2 --blocks ISSUE-3  # Repeatable
-linear issue update ISSUE-1 --link-pr                         # Link current branch's PR (auto-detect via gh)
-linear issue update ISSUE-1 --link-pr https://github.com/org/repo/pull/42  # Link specific PR
-linear issue update ISSUE-1 --link https://docs.example.com/spec  # Link a URL as a resource
-linear issue update ISSUE-1 --link https://github.com/org/repo/pull/42  # Auto-detects GitHub PRs
+linear issue update ISSUE-1 --link                            # Link current branch's PR (auto-detect via gh)
+linear issue update ISSUE-1 --link https://github.com/org/repo/pull/42  # GitHub PRs auto-detected
+linear issue update ISSUE-1 --link https://docs.example.com/spec  # Any URL works
 linear issue attach ISSUE-1 https://docs.example.com/spec        # Shorthand for update --link
 linear issue close ISSUE-1
 linear issue comment ISSUE-1 "Comment text"
