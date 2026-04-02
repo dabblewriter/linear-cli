@@ -112,10 +112,10 @@ linear issue show ISSUE-1        # Full details with parent context
 linear issue start ISSUE-1       # Assign to you + set In Progress
 linear issue create --title "Fix bug" --project "Phase 1" --assign --estimate M
 linear issue create --title "Urgent bug" --priority urgent --assign
-linear issue create --title "Task" --milestone "Beta" --estimate S
+linear issue create --title "Task" --milestone "Beta" --estimate S --status todo
 linear issue create --title "Blocked task" --blocked-by ISSUE-1 --blocked-by ISSUE-2
 linear issue create --title "Labeled" --label bug --label frontend  # Multiple labels
-linear issue update ISSUE-1 --status "In Progress"
+linear issue update ISSUE-1 --status progress   # Shortcuts: todo, progress, review, done
 linear issue update ISSUE-1 --priority high   # Set priority
 linear issue update ISSUE-1 --estimate M      # Set estimate
 linear issue update ISSUE-1 --label bug --label frontend  # Set labels (repeatable)
@@ -127,6 +127,9 @@ linear issue update ISSUE-1 --check "validation" # Check off a todo item
 linear issue update ISSUE-1 --blocks ISSUE-2 --blocks ISSUE-3  # Repeatable
 linear issue update ISSUE-1 --link-pr                         # Link current branch's PR (auto-detect via gh)
 linear issue update ISSUE-1 --link-pr https://github.com/org/repo/pull/42  # Link specific PR
+linear issue update ISSUE-1 --link https://docs.example.com/spec  # Link a URL as a resource
+linear issue update ISSUE-1 --link https://github.com/org/repo/pull/42  # Auto-detects GitHub PRs
+linear issue attach ISSUE-1 https://docs.example.com/spec        # Shorthand for update --link
 linear issue close ISSUE-1
 linear issue comment ISSUE-1 "Comment text"
 
@@ -330,7 +333,7 @@ linear project complete "Phase 1"
 
 ## Parent Context
 
-When viewing an issue with `linear issue show`, you'll see where it fits in the larger work:
+When viewing an issue with `linear issue show`, you'll see where it fits in the larger work, along with linked resources:
 
 ```
 # ISSUE-6: Add JWT validation
@@ -344,6 +347,13 @@ ISSUE-3: Implement authentication system
   - [Done] ISSUE-4: Add login endpoint
   → [In Progress] ISSUE-6: Add JWT validation  ← you are here
   - [Backlog] ISSUE-7: Add refresh tokens
+
+## Resources
+
+  - github.com/org/repo/pull/42
+    https://github.com/org/repo/pull/42
+  - docs.example.com/auth-spec
+    https://docs.example.com/auth-spec
 ```
 
-This helps understand the scope and what comes before/after the current task.
+This helps understand the scope, what comes before/after the current task, and any linked PRs or documentation.

@@ -313,7 +313,7 @@ function checkAuth() {
   }
 }
 
-async function gql(query, variables = {}, { retry = true } = {}) {
+async function gql(query, variables = {}, { retry = true, rawErrors = false } = {}) {
   let response;
   try {
     response = await fetch(API_URL, {
@@ -328,7 +328,7 @@ async function gql(query, variables = {}, { retry = true } = {}) {
   } catch (err) {
     if (retry && err.name === 'TimeoutError') {
       console.error(colors.gray('Request timed out, retrying...'));
-      return gql(query, variables, { retry: false });
+      return gql(query, variables, { retry: false, rawErrors });
     }
     const msg =
       err.name === 'TimeoutError'
@@ -339,13 +339,17 @@ async function gql(query, variables = {}, { retry = true } = {}) {
   }
 
   if (!response.ok) {
+    if (rawErrors) {
+      const json = await response.json().catch(() => ({}));
+      return { errors: json.errors || [{ message: response.statusText, extensions: { statusCode: response.status } }] };
+    }
     console.error(colors.red(`HTTP error: ${response.status} ${response.statusText}`));
     process.exit(1);
   }
 
   const json = await response.json();
 
-  if (json.errors?.length) {
+  if (json.errors?.length && !rawErrors) {
     console.error(colors.red(`API error: ${json.errors[0].message}`));
     process.exit(1);
   }
@@ -378,6 +382,77 @@ function suggestTeamKey(teamName) {
 
   // Ensure it's at least 2 chars and max 5
   return key.slice(0, 5) || 'TEAM';
+}
+
+// Map user-friendly status names and shortcuts to Linear state type/name
+// Linear state types: triage, backlog, unstarted, started, completed, canceled
+// State names vary per team, but types are stable
+const STATUS_ALIASES = {
+  // UI names → { type, name? }
+  todo: { type: 'unstarted' },
+  pending: { type: 'unstarted' },
+  backlog: { type: 'backlog' },
+  triage: { type: 'triage' },
+  'in-progress': { type: 'started', name: 'In Progress' },
+  inprogress: { type: 'started', name: 'In Progress' },
+  in_progress: { type: 'started', name: 'In Progress' },
+  'in progress': { type: 'started', name: 'In Progress' },
+  done: { type: 'completed' },
+  canceled: { type: 'canceled', name: 'Canceled' },
+  cancelled: { type: 'canceled', name: 'Canceled' },
+  duplicate: { type: 'canceled', name: 'Duplicate' },
+  'in-review': { type: 'started', name: 'In Review' },
+  in_review: { type: 'started', name: 'In Review' },
+  inreview: { type: 'started', name: 'In Review' },
+  'in review': { type: 'started', name: 'In Review' },
+  'ready-for-review': { type: 'started', name: 'Ready for Review' },
+  'ready for review': { type: 'started', name: 'Ready for Review' },
+  // Shortcuts
+  progress: { type: 'started', name: 'In Progress' },
+  review: { type: 'started', name: 'In Review' },
+  // Direct type names
+  started: { type: 'started' },
+  completed: { type: 'completed' },
+  unstarted: { type: 'unstarted' },
+};
+
+// Resolve a user-provided status string to a workflow state object
+// States must include { id, name, type } fields
+function resolveState(input, states) {
+  const normalized = input.toLowerCase().trim();
+  const alias = STATUS_ALIASES[normalized];
+
+  if (alias) {
+    // If alias specifies a name, try exact name match first
+    if (alias.name) {
+      const nameMatch = states.find(s => s.name.toLowerCase() === alias.name.toLowerCase());
+      if (nameMatch) return nameMatch;
+    }
+    // Fall back to first state of the matching type
+    const typeMatch = states.find(s => s.type === alias.type);
+    if (typeMatch) return typeMatch;
+  }
+
+  // No alias matched — try exact name match
+  const exactMatch = states.find(s => s.name.toLowerCase() === normalized);
+  if (exactMatch) return exactMatch;
+
+  // Try exact type match
+  const typeMatch = states.find(s => s.type === normalized);
+  if (typeMatch) return typeMatch;
+
+  // Last resort: substring match on name
+  const substringMatch = states.find(s => s.name.toLowerCase().includes(normalized));
+  if (substringMatch) return substringMatch;
+
+  return null;
+}
+
+// Resolve a status alias to a Linear state type string (for local filtering)
+function resolveStatusType(input) {
+  const normalized = input.toLowerCase().trim();
+  const alias = STATUS_ALIASES[normalized];
+  return alias?.type || normalized;
 }
 
 function openBrowser(url) {
@@ -502,23 +577,8 @@ async function cmdIssues(args) {
   const labelFilters = opts.label || opts.l || [];
   const priorityFilter = (opts.priority || '').toLowerCase();
 
-  // Map user-friendly status names to Linear's internal state types
-  const STATUS_TYPE_MAP = {
-    backlog: 'backlog',
-    todo: 'unstarted',
-    'in-progress': 'started',
-    inprogress: 'started',
-    in_progress: 'started',
-    started: 'started',
-    done: 'completed',
-    completed: 'completed',
-    canceled: 'canceled',
-    cancelled: 'canceled',
-    triage: 'triage',
-  };
-
-  // Resolve status filters to state types (match by type map or by state name)
-  const resolvedStatusTypes = statusFilter.map(s => STATUS_TYPE_MAP[s.toLowerCase()] || s.toLowerCase());
+  // Resolve status filters to state types using shared alias map
+  const resolvedStatusTypes = statusFilter.map(s => resolveStatusType(s));
 
   // Get current user ID for filtering/sorting
   const viewerResult = await gql('{ viewer { id } }');
@@ -729,6 +789,7 @@ async function cmdIssueShow(args) {
           relatedIssue { identifier title state { name } }
         }
       }
+      attachments { nodes { title subtitle url sourceType } }
       comments { nodes { body createdAt user { name } } }
     }
   }`;
@@ -818,6 +879,16 @@ async function cmdIssueShow(args) {
     }
   }
 
+  if (issue.attachments.nodes.length > 0) {
+    console.log('\n## Resources\n');
+    for (const att of issue.attachments.nodes) {
+      const label = att.title || att.url;
+      const subtitle = att.subtitle ? ` - ${att.subtitle}` : '';
+      console.log(`  - ${label}${subtitle}`);
+      console.log(`    ${colors.gray(att.url)}`);
+    }
+  }
+
   console.log('\n## Description\n');
   console.log(issue.description || 'No description');
 
@@ -890,6 +961,7 @@ async function cmdIssueCreate(args) {
   const shouldAssign = opts.assign;
   const estimate = (opts.estimate || opts.e || '').toLowerCase();
   const labelNames = opts.label || opts.l || [];
+  const statusName = opts.status || opts.s || '';
   const blocksIssues = opts.blocks || [];
   const blockedByIssues = opts['blocked-by'] || [];
 
@@ -984,6 +1056,23 @@ async function cmdIssueCreate(args) {
     }
   }
 
+  // Resolve status to state ID
+  let stateId = null;
+  if (statusName) {
+    const statesResult = await gql(`{
+      team(id: "${TEAM_KEY}") {
+        states { nodes { id name type } }
+      }
+    }`);
+    const states = statesResult.data?.team?.states?.nodes || [];
+    const match = resolveState(statusName, states);
+    if (match) {
+      stateId = match.id;
+    } else {
+      console.error(colors.yellow(`Warning: Status "${statusName}" not found.`));
+    }
+  }
+
   // Get current user ID if assigning
   let assigneeId = null;
   if (shouldAssign) {
@@ -1005,6 +1094,7 @@ async function cmdIssueCreate(args) {
   if (milestoneId) input.projectMilestoneId = milestoneId;
   if (parent) input.parentId = parent;
   if (assigneeId) input.assigneeId = assigneeId;
+  if (stateId) input.stateId = stateId;
   if (estimate) input.estimate = ESTIMATE_MAP[estimate];
   if (priority) input.priority = PRIORITY_MAP[priority];
   if (labelIds.length > 0) input.labelIds = labelIds;
@@ -1087,11 +1177,13 @@ async function cmdIssueUpdate(args) {
     blocks: 'array',
     'blocked-by': 'array',
     'link-pr': 'optionalArray',
+    link: 'array',
   });
 
   const blocksIssues = opts.blocks || [];
   const blockedByIssues = opts['blocked-by'] || [];
   const linkPrs = opts['link-pr'] || [];
+  const linkUrls = opts.link || [];
   const projectName = resolveAlias(opts.project || opts.p);
   const milestoneName = resolveAlias(opts.milestone);
   const priorityName = (opts.priority || '').toLowerCase();
@@ -1216,12 +1308,16 @@ async function cmdIssueUpdate(args) {
     const stateName = opts.status || opts.s;
     const statesResult = await gql(`{
       team(id: "${TEAM_KEY}") {
-        states { nodes { id name } }
+        states { nodes { id name type } }
       }
     }`);
     const states = statesResult.data?.team?.states?.nodes || [];
-    const match = states.find(s => s.name.toLowerCase().includes(stateName.toLowerCase()));
-    if (match) input.stateId = match.id;
+    const match = resolveState(stateName, states);
+    if (match) {
+      input.stateId = match.id;
+    } else {
+      console.error(colors.yellow(`Warning: Status "${stateName}" not found.`));
+    }
   }
 
   // Handle labels
@@ -1287,8 +1383,9 @@ async function cmdIssueUpdate(args) {
   // Handle blocking relations (can be set even without other updates)
   const hasRelationUpdates = blocksIssues.length > 0 || blockedByIssues.length > 0;
   const hasLinkPrs = linkPrs.length > 0;
+  const hasLinks = linkUrls.length > 0;
 
-  if (Object.keys(input).length === 0 && !hasRelationUpdates && !hasLinkPrs) {
+  if (Object.keys(input).length === 0 && !hasRelationUpdates && !hasLinkPrs && !hasLinks) {
     console.error(colors.red('Error: No updates specified'));
     process.exit(1);
   }
@@ -1340,47 +1437,74 @@ async function cmdIssueUpdate(args) {
     }
   }
 
-  // Link pull requests
-  if (hasLinkPrs) {
-    // Resolve auto-detect entries (true) to current branch's PR URL via gh
-    const prUrls = [];
-    for (const entry of linkPrs) {
-      if (entry === true) {
-        try {
-          const json = execSync('gh pr view --json url', {
-            encoding: 'utf-8',
-            stdio: ['pipe', 'pipe', 'pipe'],
-          });
-          const url = JSON.parse(json).url;
-          if (url) {
-            prUrls.push(url);
-          } else {
-            console.error(colors.red('Error: No PR found for current branch'));
-            process.exit(1);
-          }
-        } catch {
-          console.error(colors.red('Error: Could not detect PR for current branch (is gh installed and a PR open?)'));
+  // Link URLs (--link-pr and --link)
+  // Collect all URLs to link, resolving --link-pr auto-detect entries
+  const allLinks = [];
+
+  for (const entry of linkPrs) {
+    if (entry === true) {
+      try {
+        const json = execSync('gh pr view --json url', {
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+        const url = JSON.parse(json).url;
+        if (url) {
+          allLinks.push(url);
+        } else {
+          console.error(colors.red('Error: No PR found for current branch'));
           process.exit(1);
         }
-      } else {
-        prUrls.push(entry);
+      } catch {
+        console.error(colors.red('Error: Could not detect PR for current branch (is gh installed and a PR open?)'));
+        process.exit(1);
       }
+    } else {
+      allLinks.push(entry);
     }
+  }
+  allLinks.push(...linkUrls);
 
-    const linkMutation = `
+  if (allLinks.length > 0) {
+    const prMutation = `
       mutation($issueId: String!, $url: String!) {
-        attachmentLinkGitHubPullRequest(issueId: $issueId, url: $url) {
-          success
-        }
+        attachmentLinkGitHubPR(issueId: $issueId, url: $url) { success }
+      }
+    `;
+    const urlMutation = `
+      mutation($issueId: String!, $url: String!, $title: String!) {
+        attachmentLinkURL(issueId: $issueId, url: $url, title: $title) { success }
       }
     `;
 
-    for (const url of prUrls) {
-      const result = await gql(linkMutation, { issueId, url });
-      if (result.data?.attachmentLinkGitHubPullRequest?.success) {
-        console.log(colors.green(`Linked PR: ${url}`));
+    for (const url of allLinks) {
+      const isGitHubPR = /^https?:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+/.test(url);
+
+      let result;
+      if (isGitHubPR) {
+        result = await gql(prMutation, { issueId, url }, { rawErrors: true });
       } else {
-        console.error(colors.red(`Failed to link PR: ${url}`));
+        let title;
+        try {
+          const parsed = new URL(url);
+          title = parsed.hostname + parsed.pathname;
+        } catch {
+          title = url;
+        }
+        result = await gql(urlMutation, { issueId, url, title }, { rawErrors: true });
+      }
+
+      const success = isGitHubPR
+        ? result.data?.attachmentLinkGitHubPR?.success
+        : result.data?.attachmentLinkURL?.success;
+      const label = isGitHubPR ? 'Linked PR' : 'Linked';
+
+      if (success) {
+        console.log(colors.green(`${label}: ${url}`));
+      } else if (result.errors?.[0]?.extensions?.statusCode === 400) {
+        console.log(colors.gray(`Already linked: ${url}`));
+      } else {
+        console.error(colors.red(`Failed to link: ${url}`));
         console.error(result.errors?.[0]?.message || JSON.stringify(result));
       }
     }
@@ -3266,10 +3390,11 @@ ISSUES:
     --label, -l <name>       Add label (repeatable)
     --blocks <id>            This issue blocks another (repeatable)
     --blocked-by <id>        This issue is blocked by another (repeatable)
+    --status, -s <status>    Set status (todo, in-progress, done, review, etc.)
   issue update <id> [opts]   Update an issue
     --title, -t <title>      New title
     --description, -d <desc> New description
-    --status, -s <status>    New status (todo, in-progress, done, backlog, etc.)
+    --status, -s <status>    New status (todo, in-progress, done, review, etc.)
     --project, -p <name>     Move to project
     --milestone <name>       Move to milestone
     --parent <id>            Set parent issue
@@ -3283,6 +3408,8 @@ ISSUES:
     --blocks <id>            Add blocking relation (repeatable)
     --blocked-by <id>        Add blocked-by relation (repeatable)
     --link-pr [url]          Link a GitHub PR (repeatable, auto-detects via gh if no URL)
+    --link <url>             Link a URL as a resource (repeatable)
+  issue attach <id> <url>    Attach a URL as a resource (alias for update --link)
   issue close <id>           Mark issue as done
   issue comment <id> <body>  Add a comment
   issue move <id>            Move issue in sort order
@@ -3446,6 +3573,17 @@ async function main() {
           case 'move':
             await cmdIssueMove(subargs);
             break;
+          case 'attach': {
+            // linear issue attach ISSUE-1 <url> [<url>...]
+            const attachId = subargs[0];
+            const attachUrls = subargs.slice(1);
+            if (!attachId || attachUrls.length === 0) {
+              console.error(colors.red('Usage: linear issue attach <id> <url> [<url>...]'));
+              process.exit(1);
+            }
+            await cmdIssueUpdate([attachId, ...attachUrls.flatMap(u => ['--link', u])]);
+            break;
+          }
           default:
             console.error(`Unknown issue command: ${subcmd}`);
             process.exit(1);
