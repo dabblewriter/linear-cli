@@ -357,6 +357,19 @@ async function gql(query, variables = {}, { retry = true, rawErrors = false } = 
   return json;
 }
 
+function readStdin() {
+  return new Promise((resolve, reject) => {
+    if (process.stdin.isTTY) {
+      resolve('');
+      return;
+    }
+    const chunks = [];
+    process.stdin.on('data', chunk => chunks.push(chunk));
+    process.stdin.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    process.stdin.on('error', reject);
+  });
+}
+
 function prompt(question) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   return new Promise(resolve => {
@@ -3409,6 +3422,7 @@ ISSUES:
     --blocked-by <id>        Add blocked-by relation (repeatable)
     --link [url]             Link a URL (repeatable, auto-detects PR via gh if no URL)
   issue attach <id> <url>    Attach a URL as a resource (alias for update --link)
+    --document, -d <title>   Create a Linear document from stdin and attach to issue
   issue close <id>           Mark issue as done
   issue comment <id> <body>  Add a comment
   issue move <id>            Move issue in sort order
@@ -3573,14 +3587,60 @@ async function main() {
             await cmdIssueMove(subargs);
             break;
           case 'attach': {
-            // linear issue attach ISSUE-1 <url> [<url>...]
-            const attachId = subargs[0];
-            const attachUrls = subargs.slice(1);
-            if (!attachId || attachUrls.length === 0) {
-              console.error(colors.red('Usage: linear issue attach <id> <url> [<url>...]'));
-              process.exit(1);
+            const attachOpts = parseArgs(subargs, { document: 'string', d: 'string' });
+            const attachId = attachOpts._[0];
+            const docTitle = attachOpts.document || attachOpts.d;
+
+            if (docTitle) {
+              // linear issue attach ISSUE-1 --document "Title" < content.md
+              // echo "content" | linear issue attach ISSUE-1 --document "Title"
+              if (!attachId) {
+                console.error(colors.red('Usage: linear issue attach <id> --document <title>'));
+                process.exit(1);
+              }
+              const content = await readStdin();
+              if (!content.trim()) {
+                console.error(colors.red('Error: No content provided. Pipe content via stdin.'));
+                console.error(colors.gray('  echo "content" | linear issue attach ISSUE-1 --document "Title"'));
+                console.error(colors.gray('  linear issue attach ISSUE-1 --document "Title" < plan.md'));
+                process.exit(1);
+              }
+              const issueResult = await gql(`{ issue(id: "${attachId}") { id } }`);
+              const issueUuid = issueResult.data?.issue?.id;
+              if (!issueUuid) {
+                console.error(colors.red(`Issue not found: ${attachId}`));
+                process.exit(1);
+              }
+              const docResult = await gql(
+                `
+                mutation($title: String!, $content: String, $issueId: String!) {
+                  documentCreate(input: { title: $title, content: $content, issueId: $issueId }) {
+                    success
+                    document { id url }
+                  }
+                }
+              `,
+                { title: docTitle, content, issueId: issueUuid }
+              );
+              if (docResult.data?.documentCreate?.success) {
+                console.log(colors.green(`Document created: ${docTitle}`));
+                const url = docResult.data.documentCreate.document?.url;
+                if (url) console.log(colors.gray(url));
+              } else {
+                console.error(colors.red('Failed to create document'));
+                console.error(docResult.errors?.[0]?.message || JSON.stringify(docResult));
+                process.exit(1);
+              }
+            } else {
+              // linear issue attach ISSUE-1 <url> [<url>...]
+              const attachUrls = attachOpts._.slice(1);
+              if (!attachId || attachUrls.length === 0) {
+                console.error(colors.red('Usage: linear issue attach <id> <url> [<url>...]'));
+                console.error(colors.red('       linear issue attach <id> --document <title> < content.md'));
+                process.exit(1);
+              }
+              await cmdIssueUpdate([attachId, ...attachUrls.flatMap(u => ['--link', u])]);
             }
-            await cmdIssueUpdate([attachId, ...attachUrls.flatMap(u => ['--link', u])]);
             break;
           }
           default:

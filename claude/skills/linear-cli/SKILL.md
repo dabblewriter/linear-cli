@@ -129,6 +129,7 @@ linear issue update ISSUE-1 --link                            # Link current bra
 linear issue update ISSUE-1 --link https://github.com/org/repo/pull/42  # GitHub PRs auto-detected
 linear issue update ISSUE-1 --link https://docs.example.com/spec  # Any URL works
 linear issue attach ISSUE-1 https://docs.example.com/spec        # Shorthand for update --link
+echo "# Plan\n..." | linear issue attach ISSUE-1 -d "Implementation Plan"  # Create & attach document
 linear issue close ISSUE-1
 linear issue comment ISSUE-1 "Comment text"
 
@@ -306,6 +307,20 @@ linear issue update ISSUE-2 --append "## Notes\n\nDiscovered X, trying Y approac
 linear issue comment ISSUE-2 "Found the root cause in auth.ts:142"
 ```
 
+### Attaching documents to issues
+
+Use `issue attach -d` to create a Linear document and attach it to an issue. This is useful for storing detailed plans, specs, or research without filling up the issue description. The document content is read from stdin.
+
+```bash
+# Pipe content directly
+echo "# Implementation Plan\n\n## Approach\n..." | linear issue attach ISSUE-5 -d "Implementation Plan"
+
+# From a file
+linear issue attach ISSUE-5 -d "Technical Spec" < spec.md
+```
+
+Documents appear under **Resources** in `linear issue show`, alongside URL attachments. Prefer documents over long descriptions when the content is supplementary (plans, research, specs) rather than the core issue definition.
+
 ### Organizing with milestones
 
 Milestones group related issues within a project:
@@ -349,10 +364,10 @@ ISSUE-3: Implement authentication system
 
 ## Resources
 
+  - Implementation Plan
+    https://linear.app/team/document/implementation-plan-abc123
   - github.com/org/repo/pull/42
     https://github.com/org/repo/pull/42
-  - docs.example.com/auth-spec
-    https://docs.example.com/auth-spec
 ```
 
 This helps understand the scope, what comes before/after the current task, and any linked PRs or documentation.
