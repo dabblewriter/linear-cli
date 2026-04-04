@@ -246,10 +246,12 @@ function ensureGitignore() {
   }
 }
 
-function writeConfigValue(key, value) {
-  ensureLocalConfig();
+function writeConfigValue(key, value, { global = false } = {}) {
+  const targetFile = global ? join(homedir(), '.linear') : CONFIG_FILE;
+  if (!global) ensureLocalConfig();
+  else if (!existsSync(targetFile)) writeFileSync(targetFile, '');
 
-  const content = readFileSync(CONFIG_FILE, 'utf-8');
+  const content = readFileSync(targetFile, 'utf-8');
   const lines = content.split('\n');
   let found = false;
   let insertBefore = -1;
@@ -279,13 +281,14 @@ function writeConfigValue(key, value) {
     }
   }
 
-  writeFileSync(CONFIG_FILE, lines.join('\n'));
+  writeFileSync(targetFile, lines.join('\n'));
 }
 
-function removeConfigValue(key) {
-  if (!existsSync(CONFIG_FILE)) return null;
+function removeConfigValue(key, { global = false } = {}) {
+  const targetFile = global ? join(homedir(), '.linear') : CONFIG_FILE;
+  if (!existsSync(targetFile)) return null;
 
-  const content = readFileSync(CONFIG_FILE, 'utf-8');
+  const content = readFileSync(targetFile, 'utf-8');
   const lines = content.split('\n');
   let removed = null;
 
@@ -301,7 +304,7 @@ function removeConfigValue(key) {
   });
 
   if (removed !== null) {
-    writeFileSync(CONFIG_FILE, newLines.join('\n'));
+    writeFileSync(targetFile, newLines.join('\n'));
   }
   return removed;
 }
@@ -3440,7 +3443,9 @@ PROJECTS:
     --description, -d <desc> Project description
   project complete <name>    Mark project as completed
   project open <name>        Set default project for issues/create
+    --global                 Save to ~/.linear instead of ./.linear
   project close              Clear default project
+    --global                 Remove from ~/.linear instead of ./.linear
   project move <name>        Move project in sort order
     --before <name>          Move before this project
     --after <name>           Move after this project
@@ -3459,7 +3464,9 @@ MILESTONES:
     --description, -d <desc> Milestone description
     --target-date <date>     Target date (YYYY-MM-DD)
   milestone open <name>      Set default milestone for issues/create
+    --global                 Save to ~/.linear instead of ./.linear
   milestone close            Clear default milestone
+    --global                 Remove from ~/.linear instead of ./.linear
   milestone move <name>      Move milestone in sort order
     --before <name>          Move before this milestone
     --after <name>           Move after this milestone
@@ -3677,20 +3684,24 @@ async function main() {
             await cmdProjectMove(subargs);
             break;
           case 'open': {
-            const name = resolveAlias(subargs[0]);
+            const isGlobal = subargs.includes('--global');
+            const nameArg = subargs.filter(a => a !== '--global')[0];
+            const name = resolveAlias(nameArg);
             if (!name) {
               console.error(colors.red('Error: Project name required'));
               console.error('Usage: linear project open "Project Name"');
               process.exit(1);
             }
-            writeConfigValue('project', name);
+            writeConfigValue('project', name, { global: isGlobal });
             DEFAULT_PROJECT = name;
+            const savedTo = isGlobal ? join(homedir(), '.linear') : CONFIG_FILE;
             console.log(colors.green(`Opened project: ${name}`));
-            console.log(colors.gray(`Saved to ${CONFIG_FILE}`));
+            console.log(colors.gray(`Saved to ${savedTo}`));
             break;
           }
           case 'close': {
-            const removed = removeConfigValue('project');
+            const isGlobal = subargs.includes('--global');
+            const removed = removeConfigValue('project', { global: isGlobal });
             if (removed) {
               console.log(colors.green(`Closed project: ${removed}`));
               DEFAULT_PROJECT = '';
@@ -3730,20 +3741,24 @@ async function main() {
             await cmdMilestoneMove(subargs);
             break;
           case 'open': {
-            const name = resolveAlias(subargs[0]);
+            const isGlobal = subargs.includes('--global');
+            const nameArg = subargs.filter(a => a !== '--global')[0];
+            const name = resolveAlias(nameArg);
             if (!name) {
               console.error(colors.red('Error: Milestone name required'));
               console.error('Usage: linear milestone open "Milestone Name"');
               process.exit(1);
             }
-            writeConfigValue('milestone', name);
+            writeConfigValue('milestone', name, { global: isGlobal });
             DEFAULT_MILESTONE = name;
+            const savedTo = isGlobal ? join(homedir(), '.linear') : CONFIG_FILE;
             console.log(colors.green(`Opened milestone: ${name}`));
-            console.log(colors.gray(`Saved to ${CONFIG_FILE}`));
+            console.log(colors.gray(`Saved to ${savedTo}`));
             break;
           }
           case 'close': {
-            const removed = removeConfigValue('milestone');
+            const isGlobal = subargs.includes('--global');
+            const removed = removeConfigValue('milestone', { global: isGlobal });
             if (removed) {
               console.log(colors.green(`Closed milestone: ${removed}`));
               DEFAULT_MILESTONE = '';
