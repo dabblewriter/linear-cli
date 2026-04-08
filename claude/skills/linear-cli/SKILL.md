@@ -85,13 +85,18 @@ linear whoami                   # Show current user/team
 
 # Roadmap (overview)
 linear roadmap                  # Projects with milestones and progress
+linear roadmap --all            # Include completed projects
 linear roadmap --sort priority  # Sort projects: manual (default), priority, created, updated, target
 
 # Default context (sets project/milestone for issues & create)
-linear project open "Phase 1"    # Set default project
-linear milestone open "Sprint 3" # Set default milestone
+linear project open "Phase 1"    # Set default project (./.linear)
+linear project open "Phase 1" --global  # Set default project (~/.linear)
+linear milestone open "Sprint 3" # Set default milestone (./.linear)
+linear milestone open "Sprint 3" --global  # Set default milestone (~/.linear)
 linear project close             # Clear default project
+linear project close --global    # Clear from ~/.linear
 linear milestone close           # Clear default milestone
+linear milestone close --global  # Clear from ~/.linear
 
 # Issues
 linear issues                    # Default: backlog + todo issues (filtered by open project/milestone)
@@ -175,6 +180,14 @@ linear alias --remove V2             # Remove alias
 
 # Git
 linear branch ISSUE-1            # Create branch: ISSUE-1-issue-title
+
+# Workflow
+linear next                      # Pick an issue and start in a new worktree
+linear next --dry-run            # Show commands without executing
+linear done                      # Complete work on current issue
+linear done ISSUE-1              # Complete work on a specific issue
+linear done --no-close           # Don't close the issue in Linear
+linear done --keep-branch        # Don't suggest deleting the branch
 ```
 
 ## Estimation
