@@ -85,6 +85,7 @@ linear whoami                   # Show current user/team
 
 # Roadmap (overview)
 linear roadmap                  # Projects with milestones and progress
+linear roadmap --sort priority  # Sort projects: manual (default), priority, created, updated, target
 
 # Default context (sets project/milestone for issues & create)
 linear project open "Phase 1"    # Set default project
@@ -107,6 +108,7 @@ linear issues --project "Name"  # Issues in a project
 linear issues --milestone "M1"  # Issues in a milestone
 linear issues --label bug       # Filter by label
 linear issues --priority urgent # Filter by priority (urgent/high/medium/low/none)
+linear issues --sort created    # Sort by: manual (default), priority, created, updated
 # Flags can be combined: linear issues --status todo --mine
 linear issue show ISSUE-1        # Full details with parent context
 linear issue start ISSUE-1       # Assign to you + set In Progress
@@ -136,6 +138,7 @@ linear issue comment ISSUE-1 "Comment text"
 # Projects
 linear projects                 # Active projects
 linear projects --all           # Include completed
+linear projects --sort target   # Sort by: manual (default), priority, created, updated, target
 linear project show "Phase 1"   # Details with issues
 linear project create "Name" --description "..."
 linear project complete "Phase 1"
@@ -144,6 +147,7 @@ linear project close            # Clear default project
 
 # Milestones
 linear milestones --project "P1" # Milestones in a project
+linear milestones --sort target  # Sort by: manual (default), target, status
 linear milestone show "Beta"     # Details with issues
 linear milestone create "Beta" --project "P1" --target-date 2024-03-01
 linear milestone open "Beta"    # Set as default milestone
