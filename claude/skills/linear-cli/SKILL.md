@@ -236,6 +236,22 @@ linear issues --project "P1"    # Issues in a specific project
 linear issues --milestone "M1"  # Issues in a specific milestone
 ```
 
+### Issue ordering
+
+Issue lists are returned in sort order by default. The first issue in the list is the highest priority to address next. Use this ordering to decide what to work on, and maintain it when creating issues:
+
+```bash
+# Position new issues relative to existing ones
+linear issue create --title "Urgent fix" --before ISSUE-3   # Insert higher in the list
+linear issue create --title "Nice to have" --after ISSUE-5   # Insert lower in the list
+
+# Reorder existing issues
+linear issue move ISSUE-5 --before ISSUE-1
+linear issues reorder ISSUE-1 ISSUE-2 ISSUE-3
+```
+
+When creating multiple related issues, use `--before`/`--after` to place them in the order they should be addressed.
+
 ### Starting work on an issue
 
 ```bash
