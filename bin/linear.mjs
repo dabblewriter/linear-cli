@@ -982,6 +982,8 @@ async function cmdIssueCreate(args) {
     l: 'array',
     blocks: 'array',
     'blocked-by': 'array',
+    before: 'string',
+    after: 'string',
   });
 
   const title = opts.title || opts.t || opts._[0];
@@ -996,6 +998,8 @@ async function cmdIssueCreate(args) {
   const statusName = opts.status || opts.s || '';
   const blocksIssues = opts.blocks || [];
   const blockedByIssues = opts['blocked-by'] || [];
+  const beforeId = opts.before;
+  const afterId = opts.after;
 
   if (!title) {
     console.error(colors.red('Error: Title is required'));
@@ -1121,6 +1125,35 @@ async function cmdIssueCreate(args) {
     }
   `;
 
+  // Calculate sortOrder for --before/--after positioning
+  let sortOrder = null;
+  if (beforeId || afterId) {
+    const issuesResult = await gql(`{
+      team(id: "${TEAM_KEY}") {
+        issues(first: 100) {
+          nodes { identifier sortOrder }
+        }
+      }
+    }`);
+    const allIssues = issuesResult.data?.team?.issues?.nodes || [];
+    allIssues.sort((a, b) => (b.sortOrder || 0) - (a.sortOrder || 0));
+
+    const target = allIssues.find(i => i.identifier === (beforeId || afterId).toUpperCase());
+    if (!target) {
+      console.error(colors.red(`Target issue not found: ${beforeId || afterId}`));
+      process.exit(1);
+    }
+
+    const targetIdx = allIssues.findIndex(i => i.identifier === target.identifier);
+    if (beforeId) {
+      const prevIssue = allIssues[targetIdx - 1];
+      sortOrder = prevIssue ? (target.sortOrder + prevIssue.sortOrder) / 2 : target.sortOrder + 1000;
+    } else {
+      const nextIssue = allIssues[targetIdx + 1];
+      sortOrder = nextIssue ? (target.sortOrder + nextIssue.sortOrder) / 2 : target.sortOrder - 1000;
+    }
+  }
+
   const input = { teamId, title, description };
   if (projectId) input.projectId = projectId;
   if (milestoneId) input.projectMilestoneId = milestoneId;
@@ -1130,6 +1163,7 @@ async function cmdIssueCreate(args) {
   if (estimate) input.estimate = ESTIMATE_MAP[estimate];
   if (priority) input.priority = PRIORITY_MAP[priority];
   if (labelIds.length > 0) input.labelIds = labelIds;
+  if (sortOrder !== null) input.sortOrder = sortOrder;
 
   const result = await gql(mutation, { input });
 
@@ -3504,6 +3538,8 @@ ISSUES:
     --label, -l <name>       Add label (repeatable)
     --blocks <id>            This issue blocks another (repeatable)
     --blocked-by <id>        This issue is blocked by another (repeatable)
+    --before <id>            Position before this issue in sort order
+    --after <id>             Position after this issue in sort order
     --status, -s <status>    Set status (todo, in-progress, done, review, etc.)
   issue update <id> [opts]   Update an issue
     --title, -t <title>      New title

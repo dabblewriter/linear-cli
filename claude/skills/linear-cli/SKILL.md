@@ -116,6 +116,8 @@ linear issue create --title "Fix bug" --project "Phase 1" --assign --estimate M
 linear issue create --title "Urgent bug" --priority urgent --assign
 linear issue create --title "Task" --milestone "Beta" --estimate S --status todo
 linear issue create --title "Blocked task" --blocked-by ISSUE-1 --blocked-by ISSUE-2
+linear issue create --title "Next up" --before ISSUE-3  # Position in sort order
+linear issue create --title "Later" --after ISSUE-5     # Position in sort order
 linear issue create --title "Labeled" --label bug --label frontend  # Multiple labels
 linear issue update ISSUE-1 --status progress   # Shortcuts: todo, progress, review, done
 linear issue update ISSUE-1 --priority high   # Set priority
