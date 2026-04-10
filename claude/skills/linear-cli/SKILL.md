@@ -139,6 +139,10 @@ linear issue update ISSUE-1 --link https://github.com/org/repo/pull/42  # GitHub
 linear issue update ISSUE-1 --link https://docs.example.com/spec  # Any URL works
 linear issue attach ISSUE-1 https://docs.example.com/spec        # Shorthand for update --link
 echo "# Plan\n..." | linear issue attach ISSUE-1 -d "Implementation Plan"  # Create & attach document
+linear issue update ISSUE-1 --unlink https://github.com/org/repo/pull/42   # Remove attachment by URL
+linear issue update ISSUE-1 --unlink "Implementation Plan"                 # Remove attachment by title
+linear issue detach ISSUE-1 https://docs.example.com/spec                  # Shorthand for update --unlink
+linear issue detach ISSUE-1 "Implementation Plan" --delete                 # Remove and delete the document
 linear issue close ISSUE-1
 linear issue comment ISSUE-1 "Comment text"
 
@@ -355,6 +359,14 @@ linear issue attach ISSUE-5 -d "Technical Spec" < spec.md
 ```
 
 Documents appear under **Resources** in `linear issue show`, alongside URL attachments. Prefer documents over long descriptions when the content is supplementary (plans, research, specs) rather than the core issue definition.
+
+To remove attachments, use `issue detach` or `update --unlink`. Match by URL or title. Add `--delete` to also delete the underlying Linear document (not just the attachment link).
+
+```bash
+linear issue detach ISSUE-5 "Implementation Plan"            # Remove attachment by title
+linear issue detach ISSUE-5 "Implementation Plan" --delete   # Remove and delete the document
+linear issue detach ISSUE-5 https://example.com/spec         # Remove by URL
+```
 
 ### Organizing with milestones
 

@@ -1243,11 +1243,15 @@ async function cmdIssueUpdate(args) {
     blocks: 'array',
     'blocked-by': 'array',
     link: 'optionalArray',
+    unlink: 'array',
+    delete: 'boolean',
   });
 
   const blocksIssues = opts.blocks || [];
   const blockedByIssues = opts['blocked-by'] || [];
   const linkEntries = opts.link || [];
+  const unlinkEntries = opts.unlink || [];
+  const shouldDeleteUnlinked = opts.delete || false;
   const projectName = resolveAlias(opts.project || opts.p);
   const milestoneName = resolveAlias(opts.milestone);
   const priorityName = (opts.priority || '').toLowerCase();
@@ -1447,8 +1451,9 @@ async function cmdIssueUpdate(args) {
   // Handle blocking relations (can be set even without other updates)
   const hasRelationUpdates = blocksIssues.length > 0 || blockedByIssues.length > 0;
   const hasLinks = linkEntries.length > 0;
+  const hasUnlinks = unlinkEntries.length > 0;
 
-  if (Object.keys(input).length === 0 && !hasRelationUpdates && !hasLinks) {
+  if (Object.keys(input).length === 0 && !hasRelationUpdates && !hasLinks && !hasUnlinks) {
     console.error(colors.red('Error: No updates specified'));
     process.exit(1);
   }
@@ -1568,6 +1573,76 @@ async function cmdIssueUpdate(args) {
       } else {
         console.error(colors.red(`Failed to link: ${url}`));
         console.error(result.errors?.[0]?.message || JSON.stringify(result));
+      }
+    }
+  }
+
+  // Unlink URLs/titles (--unlink)
+  if (hasUnlinks) {
+    // Fetch attachments with IDs
+    const attResult = await gql(`{
+      issue(id: "${issueId}") {
+        attachments { nodes { id title url sourceType } }
+      }
+    }`);
+    const attachments = attResult.data?.issue?.attachments?.nodes || [];
+
+    for (const entry of unlinkEntries) {
+      const match = attachments.find(
+        a => a.url === entry || (a.title && a.title.toLowerCase() === entry.toLowerCase())
+      );
+
+      if (!match) {
+        console.error(colors.red(`No attachment found matching: ${entry}`));
+        continue;
+      }
+
+      const isGitHubPR = /^https?:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+/.test(match.url);
+
+      // Delete the attachment
+      const deleteMutation = `
+        mutation($id: String!) {
+          attachmentDelete(id: $id) { success }
+        }
+      `;
+      const deleteResult = await gql(deleteMutation, { id: match.id });
+
+      if (deleteResult.data?.attachmentDelete?.success) {
+        const label = isGitHubPR ? 'Unlinked PR' : 'Unlinked';
+        console.log(colors.green(`${label}: ${match.title || match.url}`));
+      } else {
+        console.error(colors.red(`Failed to unlink: ${entry}`));
+        console.error(deleteResult.errors?.[0]?.message || JSON.stringify(deleteResult));
+        continue;
+      }
+
+      // If --delete and it's a Linear document, delete the document too
+      if (shouldDeleteUnlinked && match.sourceType === 'document') {
+        // Extract document ID from the URL or fetch it
+        const docsResult = await gql(`{
+          issue(id: "${issueId}") {
+            documents { nodes { id title url } }
+          }
+        }`);
+        const docs = docsResult.data?.issue?.documents?.nodes || [];
+        const docMatch = docs.find(
+          d => d.title?.toLowerCase() === (match.title || '').toLowerCase() || d.url === match.url
+        );
+        if (docMatch) {
+          const docDeleteResult = await gql(
+            `
+            mutation($id: String!) {
+              documentDelete(id: $id) { success }
+            }
+          `,
+            { id: docMatch.id }
+          );
+          if (docDeleteResult.data?.documentDelete?.success) {
+            console.log(colors.green(`Deleted document: ${docMatch.title}`));
+          } else {
+            console.error(colors.red(`Failed to delete document: ${docMatch.title}`));
+          }
+        }
       }
     }
   }
@@ -3558,8 +3633,11 @@ ISSUES:
     --blocks <id>            Add blocking relation (repeatable)
     --blocked-by <id>        Add blocked-by relation (repeatable)
     --link [url]             Link a URL (repeatable, auto-detects PR via gh if no URL)
+    --unlink <url-or-title>  Remove an attachment (repeatable, matches by URL or title)
   issue attach <id> <url>    Attach a URL as a resource (alias for update --link)
     --document, -d <title>   Create a Linear document from stdin and attach to issue
+  issue detach <id> <match>  Remove an attachment (alias for update --unlink)
+    --delete                 Also delete the underlying document
   issue close <id>           Mark issue as done
   issue comment <id> <body>  Add a comment
   issue move <id>            Move issue in sort order
@@ -3786,6 +3864,19 @@ async function main() {
               }
               await cmdIssueUpdate([attachId, ...attachUrls.flatMap(u => ['--link', u])]);
             }
+            break;
+          }
+          case 'detach': {
+            const detachOpts = parseArgs(subargs, { delete: 'boolean' });
+            const detachId = detachOpts._[0];
+            const detachEntries = detachOpts._.slice(1);
+            if (!detachId || detachEntries.length === 0) {
+              console.error(colors.red('Usage: linear issue detach <id> <url-or-title> [<url-or-title>...]'));
+              process.exit(1);
+            }
+            const detachArgs = [detachId, ...detachEntries.flatMap(e => ['--unlink', e])];
+            if (detachOpts.delete) detachArgs.push('--delete');
+            await cmdIssueUpdate(detachArgs);
             break;
           }
           default:
