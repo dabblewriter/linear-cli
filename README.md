@@ -95,6 +95,8 @@ The `next` command creates isolated git worktrees for each issue, making it easy
 lnext() { eval "$(linear next "$@")"; }
 ```
 
+This wrapper is what makes `next` turnkey. `linear next` does the worktree, file copy, and install itself, but its final `cd` into the new worktree and `claude --plan` launch are printed to stdout rather than executed, since a child process can't change its parent shell's directory. The `lnext` function evals that output so the `cd` lands in your shell and Claude opens in the worktree automatically.
+
 Then use `lnext` to:
 
 1. See a list of unblocked issues
