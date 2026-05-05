@@ -11,9 +11,9 @@ npm install -g @dabble/linear-cli
 This installs:
 
 - The `linear` command globally
-- A Claude Code skill to `~/.claude/skills/linear-cli.md`
-- The `/next` command to `~/.claude/commands/next.md`
-- Permission for Claude to use `linear` in `~/.claude/settings.json`
+- Claude Code skills to `~/.claude/skills/linear-cli/` and `~/.claude/skills/product-planning/`
+- The `/next` and `/done` commands to `~/.claude/commands/`
+- Permissions for Claude to use `linear` and the bundled skills in `~/.claude/settings.json`
 
 ## Quick Start
 
@@ -84,8 +84,7 @@ linear next                         # Pick an issue, create worktree, start Clau
 linear next --dry-run               # Preview what would happen
 linear done                         # Close issue, show worktree cleanup commands
 linear done --no-close              # Just show cleanup commands
-linear standup                      # Daily standup summary (Linear + GitHub)
-linear standup --no-github          # Linear only
+linear done --keep-branch           # Don't suggest deleting the branch
 ```
 
 The `next` command creates isolated git worktrees for each issue, making it easy to work on multiple issues in parallel with Claude Code. Worktrees are stored in `~/.claude-worktrees/<repo>/<branch>`.
@@ -152,7 +151,9 @@ export LINEAR_TEAM=ISSUE
 
 This CLI is designed to work seamlessly with Claude Code. After installation:
 
-- **Skill file** (`~/.claude/skills/linear-cli.md`): Teaches Claude how to use the CLI, including workflow guidelines and git conventions.
+- **Skill files**:
+  - `~/.claude/skills/linear-cli/SKILL.md` teaches Claude how to use the CLI, including workflow guidelines and git conventions.
+  - `~/.claude/skills/product-planning/SKILL.md` provides product planning workflows for brainstorming features and structuring work in Linear.
 
 - **`/next` command** (`~/.claude/commands/next.md`): Run `/next` in Claude Code to find your next issue to work on.
   - `/next` - List unblocked issues to choose from
@@ -165,12 +166,7 @@ This CLI is designed to work seamlessly with Claude Code. After installation:
   - Offers to create PR, add notes, and/or close the issue
   - Shows worktree cleanup commands if in a worktree
 
-- **`/standup` command** (`~/.claude/commands/standup.md`): Run `/standup` for daily standup.
-  - Shows issues completed yesterday, in progress today, and blocked
-  - Includes GitHub commits and PRs from yesterday
-  - Offers to draft a standup message
-
-- **Global permission**: Adds `Bash(linear:*)` to `~/.claude/settings.json` so Claude can use the CLI anywhere without prompting.
+- **Global permissions**: Adds `Bash(linear:*)` and `Skill(...)` entries to `~/.claude/settings.json` so Claude can use the CLI and bundled skills anywhere without prompting.
 
 ## Why This Exists
 
