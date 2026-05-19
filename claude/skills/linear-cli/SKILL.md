@@ -104,6 +104,7 @@ linear issues --no-project       # Bypass default project filter
 linear issues --no-milestone     # Bypass default milestone filter
 linear issues --unblocked       # Ready to work on (no blockers)
 linear issues --open            # All non-completed issues
+linear issues --done            # Completed/canceled issues only
 linear issues --status todo     # Only todo issues
 linear issues --status backlog  # Only backlog issues
 linear issues --status in-progress # Issues currently in progress
@@ -114,6 +115,9 @@ linear issues --milestone "M1"  # Issues in a milestone
 linear issues --label bug       # Filter by label
 linear issues --priority urgent # Filter by priority (urgent/high/medium/low/none)
 linear issues --sort created    # Sort by: manual (default), priority, created, updated
+linear issues --json            # Output as JSON array (works with all filters)
+linear issues --count           # Output count of matching issues
+linear issues --open --milestone "Sprint 3" --count  # Count open issues in a milestone
 # Flags can be combined: linear issues --status todo --mine
 linear issue show ISSUE-1        # Full details with parent context
 linear issue start ISSUE-1       # Assign to you + set In Progress
@@ -150,6 +154,8 @@ linear issue comment ISSUE-1 "Comment text"
 linear projects                 # Active projects
 linear projects --all           # Include completed
 linear projects --sort target   # Sort by: manual (default), priority, created, updated, target
+linear projects --json          # Output as JSON array
+linear projects --count         # Count matching projects
 linear project show "Phase 1"   # Details with issues
 linear project create "Name" --description "..."
 linear project complete "Phase 1"
@@ -159,6 +165,8 @@ linear project close            # Clear default project
 # Milestones
 linear milestones --project "P1" # Milestones in a project
 linear milestones --sort target  # Sort by: manual (default), target, status
+linear milestones --json         # Output as JSON array
+linear milestones --count        # Count matching milestones
 linear milestone show "Beta"     # Details with issues
 linear milestone create "Beta" --project "P1" --target-date 2024-03-01
 linear milestone open "Beta"    # Set as default milestone

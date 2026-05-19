@@ -56,6 +56,9 @@ linear whoami             # Show current user and team
 linear issues                        # Default: backlog + todo
 linear issues --unblocked           # Ready to work on
 linear issues --open                # All non-completed issues
+linear issues --done                # Completed/canceled issues
+linear issues --json                # Structured JSON output
+linear issues --open --count        # Count matching issues
 linear issues --status in-progress  # Filter by status
 linear issues --status todo --status in-progress  # Multiple statuses
 linear issues --mine                # Only your issues

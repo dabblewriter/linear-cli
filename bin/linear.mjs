@@ -567,6 +567,7 @@ async function cmdIssues(args) {
     a: 'boolean',
     open: 'boolean',
     o: 'boolean',
+    done: 'boolean',
     mine: 'boolean',
     m: 'boolean',
     status: 'array',
@@ -580,13 +581,18 @@ async function cmdIssues(args) {
     l: 'array',
     priority: 'string',
     sort: 'string',
+    json: 'boolean',
+    count: 'boolean',
   });
 
   const unblocked = opts.unblocked || opts.u;
   const allStates = opts.all || opts.a;
   const openOnly = opts.open || opts.o;
+  const doneOnly = opts.done;
   const mineOnly = opts.mine || opts.m;
   const sortBy = opts.sort || 'manual';
+  const jsonOutput = opts.json;
+  const countOnly = opts.count;
   const statusFilter = opts.status || opts.s || [];
   const noProject = opts['no-project'];
   const noMilestone = opts['no-milestone'];
@@ -631,9 +637,6 @@ async function cmdIssues(args) {
   const result = await gql(query);
   let issues = result.data?.team?.issues?.nodes || [];
 
-  // Check if any issues have assignees (to decide whether to show column)
-  const hasAssignees = issues.some(i => i.assignee);
-
   // Sort issues
   if (sortBy === 'created') {
     issues.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
@@ -660,34 +663,11 @@ async function cmdIssues(args) {
     });
   }
 
-  // Check if any issues have priority set
-  const hasPriority = issues.some(i => i.priority > 0);
-
-  // When filtering to a single project, drop the project column
-  const showProjectCol = !projectFilter;
-
   // Build context string for header (e.g. "[My Project > Sprint 3]")
   const contextParts = [];
   if (projectFilter) contextParts.push(resolveAlias(projectFilter));
   if (milestoneFilter) contextParts.push(resolveAlias(milestoneFilter));
   const contextStr = contextParts.length > 0 ? ` [${contextParts.join(' > ')}]` : '';
-
-  // Helper to format issue row
-  const formatRow = i => {
-    const row = [i.identifier, i.title, i.state.name];
-    if (hasPriority) {
-      const pri = PRIORITY_LABELS[i.priority] || '';
-      row.push(pri ? colors.bold(pri) : '-');
-    }
-    if (showProjectCol) {
-      row.push(i.project?.name || '-');
-    }
-    if (hasAssignees) {
-      const assignee = i.assignee?.id === viewerId ? 'you' : i.assignee?.name || '-';
-      row.push(assignee);
-    }
-    return row;
-  };
 
   // Helper to apply common filters (mine, label, project, milestone)
   const applyFilters = list => {
@@ -719,13 +699,29 @@ async function cmdIssues(args) {
     return filtered;
   };
 
+  // Helper to format issue for JSON output
+  const jsonRow = i => ({
+    identifier: i.identifier,
+    title: i.title,
+    status: i.state.name,
+    statusType: i.state.type,
+    priority: PRIORITY_LABELS[i.priority] || 'None',
+    project: i.project?.name || null,
+    milestone: i.projectMilestone?.name || null,
+    assignee: i.assignee?.name || null,
+    labels: (i.labels?.nodes || []).map(l => l.name),
+    sortOrder: i.sortOrder,
+  });
+
   // Apply status filter to issues
   const filterByStatus = (list, types) => {
     return list.filter(i => types.includes(i.state.type) || types.includes(i.state.name.toLowerCase()));
   };
 
+  let filtered;
+  let title;
+
   if (unblocked) {
-    // Collect all blocked issue IDs
     const blocked = new Set();
     for (const issue of issues) {
       for (const rel of issue.relations?.nodes || []) {
@@ -734,51 +730,60 @@ async function cmdIssues(args) {
         }
       }
     }
-
-    // Filter to unblocked, non-completed issues
-    let filtered = issues.filter(i => !['completed', 'canceled'].includes(i.state.type) && !blocked.has(i.identifier));
-    if (resolvedStatusTypes.length > 0) {
-      filtered = filterByStatus(filtered, resolvedStatusTypes);
-    }
-
-    filtered = applyFilters(filtered);
-
-    console.log(colors.bold(`Unblocked Issues${contextStr}:\n`));
-    console.log(formatTable(filtered.map(formatRow)));
+    filtered = issues.filter(i => !['completed', 'canceled'].includes(i.state.type) && !blocked.has(i.identifier));
+    title = `Unblocked Issues${contextStr}`;
   } else if (allStates) {
-    let filtered = issues;
-    if (resolvedStatusTypes.length > 0) {
-      filtered = filterByStatus(filtered, resolvedStatusTypes);
-    }
-    filtered = applyFilters(filtered);
-
-    console.log(colors.bold(`All Issues${contextStr}:\n`));
-    console.log(formatTable(filtered.map(formatRow)));
+    filtered = issues;
+    title = `All Issues${contextStr}`;
   } else if (openOnly) {
-    let filtered = issues.filter(i => !['completed', 'canceled'].includes(i.state.type));
-    if (resolvedStatusTypes.length > 0) {
-      filtered = filterByStatus(filtered, resolvedStatusTypes);
-    }
-
-    filtered = applyFilters(filtered);
-
-    console.log(colors.bold(`Open Issues${contextStr}:\n`));
-    console.log(formatTable(filtered.map(formatRow)));
+    filtered = issues.filter(i => !['completed', 'canceled'].includes(i.state.type));
+    title = `Open Issues${contextStr}`;
+  } else if (doneOnly) {
+    filtered = issues.filter(i => ['completed', 'canceled'].includes(i.state.type));
+    title = `Done Issues${contextStr}`;
   } else if (resolvedStatusTypes.length > 0) {
-    let filtered = filterByStatus(issues, resolvedStatusTypes);
-    filtered = applyFilters(filtered);
-
-    const label = statusFilter.join(' + ');
-    console.log(colors.bold(`Issues${contextStr} (${label}):\n`));
-    console.log(formatTable(filtered.map(formatRow)));
+    filtered = issues;
+    title = `Issues${contextStr} (${statusFilter.join(' + ')})`;
   } else {
-    // Default: show backlog + todo
-    let filtered = issues.filter(i => i.state.type === 'backlog' || i.state.type === 'unstarted');
-    filtered = applyFilters(filtered);
-
-    console.log(colors.bold(`Issues${contextStr} (backlog + todo):\n`));
-    console.log(formatTable(filtered.map(formatRow)));
+    filtered = issues.filter(i => i.state.type === 'backlog' || i.state.type === 'unstarted');
+    title = `Issues${contextStr} (backlog + todo)`;
   }
+
+  if (resolvedStatusTypes.length > 0) {
+    filtered = filterByStatus(filtered, resolvedStatusTypes);
+  }
+  filtered = applyFilters(filtered);
+
+  if (jsonOutput) {
+    console.log(JSON.stringify(filtered.map(jsonRow)));
+    return;
+  }
+  if (countOnly) {
+    console.log(filtered.length);
+    return;
+  }
+
+  const hasAssignees = filtered.some(i => i.assignee);
+  const hasPriority = filtered.some(i => i.priority > 0);
+  const showProjectCol = !projectFilter;
+  const formatRow = i => {
+    const row = [i.identifier, i.title, i.state.name];
+    if (hasPriority) {
+      const pri = PRIORITY_LABELS[i.priority] || '';
+      row.push(pri ? colors.bold(pri) : '-');
+    }
+    if (showProjectCol) {
+      row.push(i.project?.name || '-');
+    }
+    if (hasAssignees) {
+      const assignee = i.assignee?.id === viewerId ? 'you' : i.assignee?.name || '-';
+      row.push(assignee);
+    }
+    return row;
+  };
+
+  console.log(colors.bold(`${title}:\n`));
+  console.log(formatTable(filtered.map(formatRow)));
 }
 
 async function cmdIssueShow(args) {
@@ -797,6 +802,7 @@ async function cmdIssueShow(args) {
       state { name }
       priority
       project { name }
+      projectMilestone { name }
       labels { nodes { name } }
       assignee { name }
       parent {
@@ -838,6 +844,7 @@ async function cmdIssueShow(args) {
   console.log(`State: ${issue.state.name}`);
   console.log(`Priority: ${issue.priority || 'None'}`);
   console.log(`Project: ${issue.project?.name || 'None'}`);
+  console.log(`Milestone: ${issue.projectMilestone?.name || 'None'}`);
   console.log(`Assignee: ${issue.assignee?.name || 'Unassigned'}`);
   console.log(`Labels: ${issue.labels.nodes.map(l => l.name).join(', ') || 'None'}`);
 
@@ -1775,9 +1782,11 @@ async function cmdIssueComment(args) {
 // ============================================================================
 
 async function cmdProjects(args) {
-  const opts = parseArgs(args, { all: 'boolean', a: 'boolean', sort: 'string' });
+  const opts = parseArgs(args, { all: 'boolean', a: 'boolean', sort: 'string', json: 'boolean', count: 'boolean' });
   const showAll = opts.all || opts.a;
   const sortBy = opts.sort || 'manual';
+  const jsonOutput = opts.json;
+  const countOnly = opts.count;
 
   const query = `{
     team(id: "${TEAM_KEY}") {
@@ -1818,14 +1827,33 @@ async function cmdProjects(args) {
     projects = projects.filter(p => !['completed', 'canceled'].includes(p.state));
   }
 
-  // Find alias for a project (name must start with alias target)
+  if (jsonOutput) {
+    console.log(
+      JSON.stringify(
+        projects.map(p => ({
+          name: p.name,
+          state: p.state,
+          progress: Math.floor(p.progress * 100),
+          priority: p.priority || 0,
+          targetDate: p.targetDate || null,
+          startDate: p.startDate || null,
+          sortOrder: p.sortOrder,
+        }))
+      )
+    );
+    return;
+  }
+  if (countOnly) {
+    console.log(projects.length);
+    return;
+  }
+
   const findAliasFor = name => {
     const lowerName = name.toLowerCase();
     let bestMatch = null;
     let bestLength = 0;
     for (const [code, aliasName] of Object.entries(ALIASES)) {
       const lowerAlias = aliasName.toLowerCase();
-      // Name must start with the alias target, and prefer longer matches
       if (lowerName.startsWith(lowerAlias) && lowerAlias.length > bestLength) {
         bestMatch = code;
         bestLength = lowerAlias.length;
@@ -1995,10 +2023,14 @@ async function cmdMilestones(args) {
     all: 'boolean',
     a: 'boolean',
     sort: 'string',
+    json: 'boolean',
+    count: 'boolean',
   });
   const projectFilter = opts.project || opts.p;
   const showAll = opts.all || opts.a;
   const sortBy = opts.sort || 'manual';
+  const jsonOutput = opts.json;
+  const countOnly = opts.count;
 
   const query = `{
     team(id: "${TEAM_KEY}") {
@@ -2030,14 +2062,63 @@ async function cmdMilestones(args) {
     projects = projects.filter(p => p.name.toLowerCase().includes(resolvedFilter.toLowerCase()));
   }
 
-  // Find alias for a name (name must start with alias target)
+  // Sort and collect milestones per project
+  const sortMilestones = milestones => {
+    const sorted = milestones.slice();
+    if (sortBy === 'target') {
+      sorted.sort((a, b) => {
+        if (!a.targetDate && !b.targetDate) return (b.sortOrder || 0) - (a.sortOrder || 0);
+        if (!a.targetDate) return 1;
+        if (!b.targetDate) return -1;
+        const d = new Date(a.targetDate) - new Date(b.targetDate);
+        return d !== 0 ? d : (b.sortOrder || 0) - (a.sortOrder || 0);
+      });
+    } else if (sortBy === 'status') {
+      const statusOrder = { inProgress: 0, planned: 1, completed: 2 };
+      sorted.sort((a, b) => {
+        const s = (statusOrder[a.status] ?? 1) - (statusOrder[b.status] ?? 1);
+        return s !== 0 ? s : (b.sortOrder || 0) - (a.sortOrder || 0);
+      });
+    } else {
+      sorted.sort((a, b) => (b.sortOrder || 0) - (a.sortOrder || 0));
+    }
+    return sorted;
+  };
+
+  if (jsonOutput) {
+    const all = [];
+    for (const project of projects) {
+      const milestones = project.projectMilestones?.nodes || [];
+      if (milestones.length === 0) continue;
+      for (const m of sortMilestones(milestones)) {
+        all.push({
+          name: m.name,
+          status: m.status,
+          targetDate: m.targetDate || null,
+          sortOrder: m.sortOrder,
+          projectName: project.name,
+        });
+      }
+    }
+    console.log(JSON.stringify(all));
+    return;
+  }
+
+  if (countOnly) {
+    let total = 0;
+    for (const project of projects) {
+      total += (project.projectMilestones?.nodes || []).length;
+    }
+    console.log(total);
+    return;
+  }
+
   const findAliasFor = name => {
     const lowerName = name.toLowerCase();
     let bestMatch = null;
     let bestLength = 0;
     for (const [code, aliasName] of Object.entries(ALIASES)) {
       const lowerAlias = aliasName.toLowerCase();
-      // Name must start with the alias target, and prefer longer matches
       if (lowerName.startsWith(lowerAlias) && lowerAlias.length > bestLength) {
         bestMatch = code;
         bestLength = lowerAlias.length;
@@ -2048,34 +2129,17 @@ async function cmdMilestones(args) {
 
   console.log(colors.bold('Milestones:\n'));
   for (const project of projects) {
-    const milestones = (project.projectMilestones?.nodes || []).slice();
+    const milestones = project.projectMilestones?.nodes || [];
     if (milestones.length === 0) continue;
 
-    // Sort milestones
-    if (sortBy === 'target') {
-      milestones.sort((a, b) => {
-        if (!a.targetDate && !b.targetDate) return (b.sortOrder || 0) - (a.sortOrder || 0);
-        if (!a.targetDate) return 1;
-        if (!b.targetDate) return -1;
-        const d = new Date(a.targetDate) - new Date(b.targetDate);
-        return d !== 0 ? d : (b.sortOrder || 0) - (a.sortOrder || 0);
-      });
-    } else if (sortBy === 'status') {
-      const statusOrder = { inProgress: 0, planned: 1, completed: 2 };
-      milestones.sort((a, b) => {
-        const s = (statusOrder[a.status] ?? 1) - (statusOrder[b.status] ?? 1);
-        return s !== 0 ? s : (b.sortOrder || 0) - (a.sortOrder || 0);
-      });
-    } else {
-      milestones.sort((a, b) => (b.sortOrder || 0) - (a.sortOrder || 0));
-    }
+    const sorted = sortMilestones(milestones);
 
     const projectAlias = findAliasFor(project.name);
     const projectHeader = projectAlias
       ? `${colors.bold(`[${projectAlias}]`)} ${colors.bold(project.name)}`
       : colors.bold(project.name);
     console.log(projectHeader);
-    for (const m of milestones) {
+    for (const m of sorted) {
       const milestoneAlias = findAliasFor(m.name);
       const namePrefix = milestoneAlias ? `${colors.bold(`[${milestoneAlias}]`)} ` : '';
       const date = m.targetDate ? ` (${m.targetDate})` : '';
@@ -3586,6 +3650,7 @@ ISSUES:
   issues [options]           List issues (default: backlog + todo, yours first)
     --unblocked, -u          Show only unblocked issues
     --open, -o               Show all non-completed/canceled issues
+    --done                   Show only completed/canceled issues
     --status, -s <name>      Filter by status (repeatable: --status todo --status backlog)
     --all, -a                Show all states (including completed)
     --mine, -m               Show only issues assigned to you
@@ -3597,6 +3662,8 @@ ISSUES:
     --priority <level>       Filter by priority (urgent/high/medium/low/none)
     --sort <field>           Sort by: manual (default), priority, created, updated
                              Ties fall back to manual order
+    --json                   Output as JSON array
+    --count                  Output only the count of matching items
   issues reorder <ids...>    Reorder issues by listing IDs in order
 
   issue show <id>            Show issue details with parent context
@@ -3649,6 +3716,8 @@ PROJECTS:
     --all, -a                Include completed projects
     --sort <field>           Sort by: manual (default), priority, created, updated, target
                              Ties fall back to manual order
+    --json                   Output as JSON array
+    --count                  Output only the count of matching items
   projects reorder <names..> Reorder projects by listing names in order
 
   project show <name>        Show project details with issues
@@ -3670,6 +3739,8 @@ MILESTONES:
     --all, -a                Include completed projects
     --sort <field>           Sort by: manual (default), target, status
                              Ties fall back to manual order
+    --json                   Output as JSON array
+    --count                  Output only the count of matching items
   milestones reorder <names> Reorder milestones (requires --project)
     --project, -p <name>     Project containing milestones
 
