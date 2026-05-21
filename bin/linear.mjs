@@ -563,9 +563,11 @@ function parseArgs(args, flags = {}) {
   return result;
 }
 
-async function resolveAssignee(name) {
-  const result = await gql(`{ team(id: "${TEAM_KEY}") { members { nodes { id name } } } }`);
-  const members = result.data?.team?.members?.nodes || [];
+async function resolveAssignee(name, members = null) {
+  if (!members) {
+    const result = await gql(`{ team(id: "${TEAM_KEY}") { members { nodes { id name } } } }`);
+    members = result.data?.team?.members?.nodes || [];
+  }
   const matches = members.filter(m => m.name.toLowerCase().includes(name.toLowerCase()));
   if (matches.length === 0) {
     console.error(colors.red(`Error: No team member found matching "${name}"`));
@@ -580,9 +582,9 @@ async function resolveAssignee(name) {
   return matches[0].id;
 }
 
-async function resolveAssigneeOption(assignOption) {
-  if (assignOption === true) return (await gql('{ viewer { id } }')).data?.viewer?.id;
-  if (assignOption) return resolveAssignee(assignOption);
+async function resolveAssigneeOption(assignOption, { members = null, viewerId = null } = {}) {
+  if (assignOption === true) return viewerId ?? (await gql('{ viewer { id } }')).data?.viewer?.id;
+  if (assignOption) return resolveAssignee(assignOption, members);
   return null;
 }
 
@@ -1059,9 +1061,25 @@ async function cmdIssueCreate(args) {
     process.exit(1);
   }
 
-  // Get team UUID (required for mutations)
-  const teamResult = await gql(`{ team(id: "${TEAM_KEY}") { id } }`);
-  const teamId = teamResult.data?.team?.id;
+  // Fetch all needed data in parallel
+  const [teamResult, viewerResult, issuesResult] = await Promise.all([
+    gql(`{
+      team(id: "${TEAM_KEY}") {
+        id
+        projects(first: 50) { nodes { id name projectMilestones { nodes { id name } } } }
+        labels(first: 100) { nodes { id name } }
+        states { nodes { id name type } }
+        members { nodes { id name } }
+      }
+    }`),
+    assignOption === true ? gql('{ viewer { id } }') : Promise.resolve(null),
+    beforeId || afterId
+      ? gql(`{ team(id: "${TEAM_KEY}") { issues(first: 100) { nodes { identifier sortOrder } } } }`)
+      : Promise.resolve(null),
+  ]);
+
+  const team = teamResult.data?.team;
+  const teamId = team?.id;
 
   if (!teamId) {
     console.error(colors.red(`Error: Team not found: ${TEAM_KEY}`));
@@ -1071,75 +1089,46 @@ async function cmdIssueCreate(args) {
   // Look up project and milestone IDs
   let projectId = null;
   let milestoneId = null;
-  if (project || milestone) {
-    const projectsResult = await gql(`{
-      team(id: "${TEAM_KEY}") {
-        projects(first: 50) {
-          nodes {
-            id name
-            projectMilestones { nodes { id name } }
-          }
-        }
-      }
-    }`);
-    const projects = projectsResult.data?.team?.projects?.nodes || [];
-
-    if (project) {
-      const projectMatch = projects.find(p => p.name.toLowerCase().includes(project.toLowerCase()));
-      if (projectMatch) {
-        projectId = projectMatch.id;
-        // Look for milestone within this project
-        if (milestone) {
-          const milestoneMatch = projectMatch.projectMilestones?.nodes?.find(m =>
-            m.name.toLowerCase().includes(milestone.toLowerCase())
-          );
-          if (milestoneMatch) milestoneId = milestoneMatch.id;
-        }
-      }
-    } else if (milestone) {
-      // Search all projects for the milestone
-      for (const p of projects) {
-        const milestoneMatch = p.projectMilestones?.nodes?.find(m =>
+  const projects = team.projects?.nodes || [];
+  if (project) {
+    const projectMatch = projects.find(p => p.name.toLowerCase().includes(project.toLowerCase()));
+    if (projectMatch) {
+      projectId = projectMatch.id;
+      if (milestone) {
+        const milestoneMatch = projectMatch.projectMilestones?.nodes?.find(m =>
           m.name.toLowerCase().includes(milestone.toLowerCase())
         );
-        if (milestoneMatch) {
-          projectId = p.id; // Auto-set project from milestone
-          milestoneId = milestoneMatch.id;
-          break;
-        }
+        if (milestoneMatch) milestoneId = milestoneMatch.id;
+      }
+    }
+  } else if (milestone) {
+    for (const p of projects) {
+      const milestoneMatch = p.projectMilestones?.nodes?.find(m =>
+        m.name.toLowerCase().includes(milestone.toLowerCase())
+      );
+      if (milestoneMatch) {
+        projectId = p.id;
+        milestoneId = milestoneMatch.id;
+        break;
       }
     }
   }
 
   // Look up label IDs
   let labelIds = [];
-  if (labelNames.length > 0) {
-    const labelsResult = await gql(`{
-      team(id: "${TEAM_KEY}") {
-        labels(first: 100) { nodes { id name } }
-      }
-    }`);
-    const labels = labelsResult.data?.team?.labels?.nodes || [];
-    for (const labelName of labelNames) {
-      const match = labels.find(l => l.name.toLowerCase() === labelName.toLowerCase());
-      if (match) {
-        labelIds.push(match.id);
-      } else {
-        console.error(colors.yellow(`Warning: Label "${labelName}" not found.`));
-      }
+  for (const labelName of labelNames) {
+    const match = (team.labels?.nodes || []).find(l => l.name.toLowerCase() === labelName.toLowerCase());
+    if (match) {
+      labelIds.push(match.id);
+    } else {
+      console.error(colors.yellow(`Warning: Label "${labelName}" not found.`));
     }
   }
 
   // Resolve status to state ID
   let stateId = null;
   if (statusName) {
-    const statesResult = await gql(`{
-      team(id: "${TEAM_KEY}") {
-        states { nodes { id name type } }
-      }
-    }`);
-    const states = statesResult.data?.team?.states?.nodes || [];
-    const match = resolveState(statusName, states);
+    const match = resolveState(statusName, team.states?.nodes || []);
     if (match) {
       stateId = match.id;
     } else {
@@ -1148,7 +1137,10 @@ async function cmdIssueCreate(args) {
   }
 
   // Handle assign
-  const assigneeId = await resolveAssigneeOption(assignOption);
+  const assigneeId = await resolveAssigneeOption(assignOption, {
+    members: team.members?.nodes,
+    viewerId: viewerResult?.data?.viewer?.id,
+  });
 
   const mutation = `
     mutation($input: IssueCreateInput!) {
@@ -1162,15 +1154,9 @@ async function cmdIssueCreate(args) {
   // Calculate sortOrder for --before/--after positioning
   let sortOrder = null;
   if (beforeId || afterId) {
-    const issuesResult = await gql(`{
-      team(id: "${TEAM_KEY}") {
-        issues(first: 100) {
-          nodes { identifier sortOrder }
-        }
-      }
-    }`);
-    const allIssues = issuesResult.data?.team?.issues?.nodes || [];
-    allIssues.sort((a, b) => (b.sortOrder || 0) - (a.sortOrder || 0));
+    const allIssues = (issuesResult.data?.team?.issues?.nodes || []).sort(
+      (a, b) => (b.sortOrder || 0) - (a.sortOrder || 0)
+    );
 
     const target = allIssues.find(i => i.identifier === (beforeId || afterId).toUpperCase());
     if (!target) {
@@ -1217,27 +1203,18 @@ async function cmdIssueCreate(args) {
         }
       `;
 
-      for (const target of blocksIssues) {
-        await gql(relationMutation, {
-          input: {
-            issueId: issue.identifier,
-            relatedIssueId: target,
-            type: 'blocks',
-          },
-        });
-        console.log(colors.gray(`  → blocks ${target}`));
-      }
-
-      for (const target of blockedByIssues) {
-        await gql(relationMutation, {
-          input: {
-            issueId: target,
-            relatedIssueId: issue.identifier,
-            type: 'blocks',
-          },
-        });
-        console.log(colors.gray(`  → blocked by ${target}`));
-      }
+      await Promise.all([
+        ...blocksIssues.map(target =>
+          gql(relationMutation, { input: { issueId: issue.identifier, relatedIssueId: target, type: 'blocks' } }).then(
+            () => console.log(colors.gray(`  → blocks ${target}`))
+          )
+        ),
+        ...blockedByIssues.map(target =>
+          gql(relationMutation, { input: { issueId: target, relatedIssueId: issue.identifier, type: 'blocks' } }).then(
+            () => console.log(colors.gray(`  → blocked by ${target}`))
+          )
+        ),
+      ]);
     }
   } else {
     console.error(colors.red('Failed to create issue'));
@@ -1293,6 +1270,34 @@ async function cmdIssueUpdate(args) {
   const labelNames = opts.label || opts.l || [];
   const assignOption = opts.assign;
   const parent = opts.parent;
+
+  // Fetch all needed data in parallel before processing
+  const needsTeamQuery = !!(
+    opts.status ||
+    opts.s ||
+    labelNames.length ||
+    projectName ||
+    milestoneName ||
+    typeof assignOption === 'string'
+  );
+  const [teamResult, viewerResult, descResult] = await Promise.all([
+    needsTeamQuery
+      ? gql(`{
+          team(id: "${TEAM_KEY}") {
+            projects(first: 50) { nodes { id name projectMilestones { nodes { id name } } } }
+            labels(first: 100) { nodes { id name } }
+            states { nodes { id name type } }
+            members { nodes { id name } }
+          }
+        }`)
+      : Promise.resolve(null),
+    assignOption === true ? gql('{ viewer { id } }') : Promise.resolve(null),
+    opts.append || opts.a || opts.check || opts.uncheck
+      ? gql(`{ issue(id: "${issueId}") { description } }`)
+      : Promise.resolve(null),
+  ]);
+  const team = teamResult?.data?.team;
+
   const input = {};
 
   if (opts.title || opts.t) input.title = opts.title || opts.t;
@@ -1310,7 +1315,10 @@ async function cmdIssueUpdate(args) {
   if (parent) input.parentId = parent;
 
   // Handle assign
-  const assigneeId = await resolveAssigneeOption(assignOption);
+  const assigneeId = await resolveAssigneeOption(assignOption, {
+    members: team?.members?.nodes,
+    viewerId: viewerResult?.data?.viewer?.id,
+  });
   if (assigneeId) input.assigneeId = assigneeId;
 
   // Handle priority
@@ -1324,8 +1332,7 @@ async function cmdIssueUpdate(args) {
 
   // Handle append
   if (opts.append || opts.a) {
-    const currentResult = await gql(`{ issue(id: "${issueId}") { description } }`);
-    const current = currentResult.data?.issue?.description || '';
+    const current = descResult?.data?.issue?.description || '';
     input.description = current + '\n\n' + (opts.append || opts.a);
   } else if (opts.description || opts.d) {
     input.description = opts.description || opts.d;
@@ -1341,12 +1348,7 @@ async function cmdIssueUpdate(args) {
     const toMark = isCheck ? '- [x] ' : '- [ ] ';
     const verb = isCheck ? 'Checked' : 'Unchecked';
 
-    // Fetch current description if we haven't already
-    let desc = input.description;
-    if (!desc) {
-      const currentResult = await gql(`{ issue(id: "${issueId}") { description } }`);
-      desc = currentResult.data?.issue?.description || '';
-    }
+    let desc = input.description ?? descResult?.data?.issue?.description ?? '';
 
     const lines = desc.split('\n');
     const checkboxLines = lines.map((line, i) => ({ line, index: i })).filter(({ line }) => fromPattern.test(line));
@@ -1405,32 +1407,19 @@ async function cmdIssueUpdate(args) {
 
   // Handle state
   if (opts.status || opts.s) {
-    const stateName = opts.status || opts.s;
-    const statesResult = await gql(`{
-      team(id: "${TEAM_KEY}") {
-        states { nodes { id name type } }
-      }
-    }`);
-    const states = statesResult.data?.team?.states?.nodes || [];
-    const match = resolveState(stateName, states);
+    const match = resolveState(opts.status || opts.s, team?.states?.nodes || []);
     if (match) {
       input.stateId = match.id;
     } else {
-      console.error(colors.yellow(`Warning: Status "${stateName}" not found.`));
+      console.error(colors.yellow(`Warning: Status "${opts.status || opts.s}" not found.`));
     }
   }
 
   // Handle labels
   if (labelNames.length > 0) {
-    const labelsResult = await gql(`{
-      team(id: "${TEAM_KEY}") {
-        labels(first: 100) { nodes { id name } }
-      }
-    }`);
-    const labels = labelsResult.data?.team?.labels?.nodes || [];
     const labelIds = [];
     for (const labelName of labelNames) {
-      const match = labels.find(l => l.name.toLowerCase() === labelName.toLowerCase());
+      const match = (team?.labels?.nodes || []).find(l => l.name.toLowerCase() === labelName.toLowerCase());
       if (match) {
         labelIds.push(match.id);
       } else {
@@ -1442,18 +1431,7 @@ async function cmdIssueUpdate(args) {
 
   // Handle project and milestone
   if (projectName || milestoneName) {
-    const projectsResult = await gql(`{
-      team(id: "${TEAM_KEY}") {
-        projects(first: 50) {
-          nodes {
-            id name
-            projectMilestones { nodes { id name } }
-          }
-        }
-      }
-    }`);
-    const projects = projectsResult.data?.team?.projects?.nodes || [];
-
+    const projects = team?.projects?.nodes || [];
     if (projectName) {
       const projectMatch = projects.find(p => p.name.toLowerCase().includes(projectName.toLowerCase()));
       if (projectMatch) {
@@ -1466,7 +1444,6 @@ async function cmdIssueUpdate(args) {
         }
       }
     } else if (milestoneName) {
-      // Search all projects for the milestone
       for (const p of projects) {
         const milestoneMatch = p.projectMilestones?.nodes?.find(m =>
           m.name.toLowerCase().includes(milestoneName.toLowerCase())
@@ -1522,19 +1499,18 @@ async function cmdIssueUpdate(args) {
       }
     `;
 
-    for (const target of blocksIssues) {
-      await gql(relationMutation, {
-        input: { issueId: issueId, relatedIssueId: target, type: 'blocks' },
-      });
-      console.log(colors.green(`${issueId} now blocks ${target}`));
-    }
-
-    for (const target of blockedByIssues) {
-      await gql(relationMutation, {
-        input: { issueId: target, relatedIssueId: issueId, type: 'blocks' },
-      });
-      console.log(colors.green(`${issueId} now blocked by ${target}`));
-    }
+    await Promise.all([
+      ...blocksIssues.map(target =>
+        gql(relationMutation, { input: { issueId, relatedIssueId: target, type: 'blocks' } }).then(() =>
+          console.log(colors.green(`${issueId} now blocks ${target}`))
+        )
+      ),
+      ...blockedByIssues.map(target =>
+        gql(relationMutation, { input: { issueId: target, relatedIssueId: issueId, type: 'blocks' } }).then(() =>
+          console.log(colors.green(`${issueId} now blocked by ${target}`))
+        )
+      ),
+    ]);
   }
 
   // Link URLs (--link with optional auto-detect)
