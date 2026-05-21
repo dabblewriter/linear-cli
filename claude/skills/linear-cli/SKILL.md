@@ -123,6 +123,7 @@ linear issue show ISSUE-1        # Full details with parent context
 linear issue start ISSUE-1       # Assign to you + set In Progress
 linear issue create --title "Fix bug" --project "Phase 1" --assign --estimate M
 linear issue create --title "Urgent bug" --priority urgent --assign
+linear issue create --title "Task for Alice" --assign alice  # partial name match
 linear issue create --title "Task" --milestone "Beta" --estimate S --status todo
 linear issue create --title "Blocked task" --blocked-by ISSUE-1 --blocked-by ISSUE-2
 linear issue create --title "Next up" --before ISSUE-3  # Position in sort order
@@ -133,6 +134,7 @@ linear issue update ISSUE-1 --priority high   # Set priority
 linear issue update ISSUE-1 --estimate M      # Set estimate
 linear issue update ISSUE-1 --label bug --label frontend  # Set labels (repeatable)
 linear issue update ISSUE-1 --assign          # Assign to yourself
+linear issue update ISSUE-1 --assign alice   # Assign to teammate (partial name match)
 linear issue update ISSUE-1 --parent ISSUE-2  # Set parent issue
 linear issue update ISSUE-1 --milestone "Beta"
 linear issue update ISSUE-1 --append "Notes..."

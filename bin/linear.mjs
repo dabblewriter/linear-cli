@@ -522,6 +522,14 @@ function parseArgs(args, flags = {}) {
       const flagDef = flags[key];
       if (flagDef === 'boolean') {
         result[key] = true;
+      } else if (flagDef === 'optionalString') {
+        const next = args[i + 1];
+        if (next === undefined || next.startsWith('-')) {
+          result[key] = true;
+        } else {
+          i++;
+          result[key] = next;
+        }
       } else if (flagDef === 'array') {
         const value = args[++i];
         if (value === undefined || value.startsWith('-')) {
@@ -553,6 +561,29 @@ function parseArgs(args, flags = {}) {
     i++;
   }
   return result;
+}
+
+async function resolveAssignee(name) {
+  const result = await gql(`{ team(id: "${TEAM_KEY}") { members { nodes { id name } } } }`);
+  const members = result.data?.team?.members?.nodes || [];
+  const matches = members.filter(m => m.name.toLowerCase().includes(name.toLowerCase()));
+  if (matches.length === 0) {
+    console.error(colors.red(`Error: No team member found matching "${name}"`));
+    process.exit(1);
+  }
+  if (matches.length > 1) {
+    console.error(
+      colors.red(`Error: Multiple matches for "${name}": ${matches.map(m => m.name).join(', ')} — be more specific`)
+    );
+    process.exit(1);
+  }
+  return matches[0].id;
+}
+
+async function resolveAssigneeOption(assignOption) {
+  if (assignOption === true) return (await gql('{ viewer { id } }')).data?.viewer?.id;
+  if (assignOption) return resolveAssignee(assignOption);
+  return null;
 }
 
 // ============================================================================
@@ -981,7 +1012,7 @@ async function cmdIssueCreate(args) {
     parent: 'string',
     status: 'string',
     s: 'string',
-    assign: 'boolean',
+    assign: 'optionalString',
     estimate: 'string',
     e: 'string',
     priority: 'string',
@@ -999,7 +1030,7 @@ async function cmdIssueCreate(args) {
   const priority = (opts.priority || '').toLowerCase();
   const milestone = resolveAlias(opts.milestone) || DEFAULT_MILESTONE;
   const parent = opts.parent;
-  const shouldAssign = opts.assign;
+  const assignOption = opts.assign;
   const estimate = (opts.estimate || opts.e || '').toLowerCase();
   const labelNames = opts.label || opts.l || [];
   const statusName = opts.status || opts.s || '';
@@ -1011,7 +1042,7 @@ async function cmdIssueCreate(args) {
   if (!title) {
     console.error(colors.red('Error: Title is required'));
     console.error(
-      'Usage: linear issue create --title "Issue title" [--project "..."] [--milestone "..."] [--parent ISSUE-X] [--estimate M] [--priority urgent] [--assign] [--label bug] [--blocks ISSUE-X] [--blocked-by ISSUE-X]'
+      'Usage: linear issue create --title "Issue title" [--project "..."] [--milestone "..."] [--parent ISSUE-X] [--estimate M] [--priority urgent] [--assign [name]] [--label bug] [--blocks ISSUE-X] [--blocked-by ISSUE-X]'
     );
     process.exit(1);
   }
@@ -1116,12 +1147,8 @@ async function cmdIssueCreate(args) {
     }
   }
 
-  // Get current user ID if assigning
-  let assigneeId = null;
-  if (shouldAssign) {
-    const viewerResult = await gql('{ viewer { id } }');
-    assigneeId = viewerResult.data?.viewer?.id;
-  }
+  // Handle assign
+  const assigneeId = await resolveAssigneeOption(assignOption);
 
   const mutation = `
     mutation($input: IssueCreateInput!) {
@@ -1241,7 +1268,7 @@ async function cmdIssueUpdate(args) {
     e: 'string',
     label: 'array',
     l: 'array',
-    assign: 'boolean',
+    assign: 'optionalString',
     parent: 'string',
     append: 'string',
     a: 'string',
@@ -1264,7 +1291,7 @@ async function cmdIssueUpdate(args) {
   const priorityName = (opts.priority || '').toLowerCase();
   const estimate = (opts.estimate || opts.e || '').toLowerCase();
   const labelNames = opts.label || opts.l || [];
-  const shouldAssign = opts.assign;
+  const assignOption = opts.assign;
   const parent = opts.parent;
   const input = {};
 
@@ -1283,10 +1310,8 @@ async function cmdIssueUpdate(args) {
   if (parent) input.parentId = parent;
 
   // Handle assign
-  if (shouldAssign) {
-    const viewerResult = await gql('{ viewer { id } }');
-    input.assigneeId = viewerResult.data?.viewer?.id;
-  }
+  const assigneeId = await resolveAssigneeOption(assignOption);
+  if (assigneeId) input.assigneeId = assigneeId;
 
   // Handle priority
   if (priorityName) {
@@ -3674,7 +3699,7 @@ ISSUES:
     --project, -p <name>     Add to project
     --milestone <name>       Add to milestone
     --parent <id>            Parent issue (for sub-issues)
-    --assign                 Assign to yourself
+    --assign [name]          Assign to yourself (no name) or a teammate (partial name match)
     --estimate, -e <size>    Estimate: XS, S, M, L, XL
     --priority <level>       Priority: urgent, high, medium, low, none
     --label, -l <name>       Add label (repeatable)
@@ -3690,7 +3715,7 @@ ISSUES:
     --project, -p <name>     Move to project
     --milestone <name>       Move to milestone
     --parent <id>            Set parent issue
-    --assign                 Assign to yourself
+    --assign [name]          Assign to yourself (no name) or a teammate (partial name match)
     --estimate, -e <size>    Set estimate: XS, S, M, L, XL
     --priority <level>       Set priority (urgent/high/medium/low/none)
     --label, -l <name>       Set label (repeatable)
