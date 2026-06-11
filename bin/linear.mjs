@@ -360,6 +360,36 @@ async function gql(query, variables = {}, { retry = true, rawErrors = false } = 
   return json;
 }
 
+// Follow Linear's cursor pagination to fetch every node from a team-level
+// connection (issues, projects, labels …), not just the first page. `selection`
+// is the GraphQL field selection placed inside `<field>(...) { nodes { … } }`.
+// `pageSize` should preserve the prior single-page complexity for heavy
+// selections (Linear rejects larger pages); bump to 250 for lightweight
+// id/name/sortOrder lookups.
+async function fetchAllConnection(field, selection, pageSize) {
+  const nodes = [];
+  let after = null;
+  do {
+    const query = `{
+      team(id: "${TEAM_KEY}") {
+        ${field}(first: ${pageSize}${after ? `, after: "${after}"` : ''}) {
+          nodes { ${selection} }
+          pageInfo { hasNextPage endCursor }
+        }
+      }
+    }`;
+    const conn = (await gql(query)).data?.team?.[field];
+    if (!conn) break;
+    nodes.push(...(conn.nodes || []));
+    after = conn.pageInfo?.hasNextPage ? conn.pageInfo.endCursor : null;
+  } while (after);
+  return nodes;
+}
+
+const fetchAllIssues = (selection, pageSize = 100) => fetchAllConnection('issues', selection, pageSize);
+const fetchAllProjects = (selection, pageSize = 50) => fetchAllConnection('projects', selection, pageSize);
+const fetchAllLabels = (selection, pageSize = 100) => fetchAllConnection('labels', selection, pageSize);
+
 function readStdin() {
   return new Promise((resolve, reject) => {
     if (process.stdin.isTTY) {
@@ -641,34 +671,25 @@ async function cmdIssues(args) {
   const viewerResult = await gql('{ viewer { id } }');
   const viewerId = viewerResult.data?.viewer?.id;
 
-  const query = `{
-    team(id: "${TEAM_KEY}") {
-      issues(first: 100) {
-        nodes {
-          identifier
-          title
-          priority
-          sortOrder
-          createdAt
-          updatedAt
-          state { name type }
-          project { name }
-          projectMilestone { name }
-          assignee { id name }
-          labels { nodes { name } }
-          relations(first: 20) {
-            nodes {
-              type
-              relatedIssue { identifier state { type } }
-            }
-          }
-        }
+  let issues = await fetchAllIssues(`
+    identifier
+    title
+    priority
+    sortOrder
+    createdAt
+    updatedAt
+    state { name type }
+    project { name }
+    projectMilestone { name }
+    assignee { id name }
+    labels { nodes { name } }
+    relations(first: 20) {
+      nodes {
+        type
+        relatedIssue { identifier state { type } }
       }
     }
-  }`;
-
-  const result = await gql(query);
-  let issues = result.data?.team?.issues?.nodes || [];
+  `);
 
   // Sort issues
   if (sortBy === 'created') {
@@ -1062,20 +1083,18 @@ async function cmdIssueCreate(args) {
   }
 
   // Fetch all needed data in parallel
-  const [teamResult, viewerResult, issuesResult] = await Promise.all([
+  const [teamResult, projectNodes, labelNodes, viewerResult, issuesResult] = await Promise.all([
     gql(`{
       team(id: "${TEAM_KEY}") {
         id
-        projects(first: 50) { nodes { id name projectMilestones { nodes { id name } } } }
-        labels(first: 100) { nodes { id name } }
         states { nodes { id name type } }
         members { nodes { id name } }
       }
     }`),
+    fetchAllProjects('id name projectMilestones { nodes { id name } }'),
+    fetchAllLabels('id name'),
     assignOption === true ? gql('{ viewer { id } }') : Promise.resolve(null),
-    beforeId || afterId
-      ? gql(`{ team(id: "${TEAM_KEY}") { issues(first: 100) { nodes { identifier sortOrder } } } }`)
-      : Promise.resolve(null),
+    beforeId || afterId ? fetchAllIssues('identifier sortOrder', 250) : Promise.resolve(null),
   ]);
 
   const team = teamResult.data?.team;
@@ -1089,7 +1108,7 @@ async function cmdIssueCreate(args) {
   // Look up project and milestone IDs
   let projectId = null;
   let milestoneId = null;
-  const projects = team.projects?.nodes || [];
+  const projects = projectNodes;
   if (project) {
     const projectMatch = projects.find(p => p.name.toLowerCase().includes(project.toLowerCase()));
     if (projectMatch) {
@@ -1117,7 +1136,7 @@ async function cmdIssueCreate(args) {
   // Look up label IDs
   let labelIds = [];
   for (const labelName of labelNames) {
-    const match = (team.labels?.nodes || []).find(l => l.name.toLowerCase() === labelName.toLowerCase());
+    const match = labelNodes.find(l => l.name.toLowerCase() === labelName.toLowerCase());
     if (match) {
       labelIds.push(match.id);
     } else {
@@ -1154,9 +1173,7 @@ async function cmdIssueCreate(args) {
   // Calculate sortOrder for --before/--after positioning
   let sortOrder = null;
   if (beforeId || afterId) {
-    const allIssues = (issuesResult.data?.team?.issues?.nodes || []).sort(
-      (a, b) => (b.sortOrder || 0) - (a.sortOrder || 0)
-    );
+    const allIssues = (issuesResult || []).sort((a, b) => (b.sortOrder || 0) - (a.sortOrder || 0));
 
     const target = allIssues.find(i => i.identifier === (beforeId || afterId).toUpperCase());
     if (!target) {
@@ -1280,17 +1297,19 @@ async function cmdIssueUpdate(args) {
     milestoneName ||
     typeof assignOption === 'string'
   );
-  const [teamResult, viewerResult, descResult] = await Promise.all([
+  const [teamResult, projectNodes, labelNodes, viewerResult, descResult] = await Promise.all([
     needsTeamQuery
       ? gql(`{
           team(id: "${TEAM_KEY}") {
-            projects(first: 50) { nodes { id name projectMilestones { nodes { id name } } } }
-            labels(first: 100) { nodes { id name } }
             states { nodes { id name type } }
             members { nodes { id name } }
           }
         }`)
       : Promise.resolve(null),
+    projectName || milestoneName
+      ? fetchAllProjects('id name projectMilestones { nodes { id name } }')
+      : Promise.resolve([]),
+    labelNames.length ? fetchAllLabels('id name') : Promise.resolve([]),
     assignOption === true ? gql('{ viewer { id } }') : Promise.resolve(null),
     opts.append || opts.a || opts.check || opts.uncheck
       ? gql(`{ issue(id: "${issueId}") { description } }`)
@@ -1419,7 +1438,7 @@ async function cmdIssueUpdate(args) {
   if (labelNames.length > 0) {
     const labelIds = [];
     for (const labelName of labelNames) {
-      const match = (team?.labels?.nodes || []).find(l => l.name.toLowerCase() === labelName.toLowerCase());
+      const match = labelNodes.find(l => l.name.toLowerCase() === labelName.toLowerCase());
       if (match) {
         labelIds.push(match.id);
       } else {
@@ -1431,7 +1450,7 @@ async function cmdIssueUpdate(args) {
 
   // Handle project and milestone
   if (projectName || milestoneName) {
-    const projects = team?.projects?.nodes || [];
+    const projects = projectNodes;
     if (projectName) {
       const projectMatch = projects.find(p => p.name.toLowerCase().includes(projectName.toLowerCase()));
       if (projectMatch) {
@@ -1789,16 +1808,10 @@ async function cmdProjects(args) {
   const jsonOutput = opts.json;
   const countOnly = opts.count;
 
-  const query = `{
-    team(id: "${TEAM_KEY}") {
-      projects(first: 50) {
-        nodes { id name description state progress sortOrder priority createdAt updatedAt targetDate startDate }
-      }
-    }
-  }`;
-
-  const result = await gql(query);
-  let projects = result.data?.team?.projects?.nodes || [];
+  let projects = await fetchAllProjects(
+    'id name description state progress sortOrder priority createdAt updatedAt targetDate startDate',
+    250
+  );
 
   // Sort projects
   if (sortBy === 'priority') {
@@ -1880,19 +1893,9 @@ async function cmdProjectShow(args) {
   }
   const projectName = resolveAlias(projectNameArg);
 
-  const query = `{
-    team(id: "${TEAM_KEY}") {
-      projects(first: 50) {
-        nodes {
-          id name description state progress
-          issues { nodes { identifier title sortOrder state { name } } }
-        }
-      }
-    }
-  }`;
-
-  const result = await gql(query);
-  const projects = result.data?.team?.projects?.nodes || [];
+  const projects = await fetchAllProjects(
+    'id name description state progress issues { nodes { identifier title sortOrder state { name } } }'
+  );
   const project = projects.find(p => p.name.toLowerCase().includes(projectName.toLowerCase()));
 
   if (!project) {
@@ -1977,12 +1980,7 @@ async function cmdProjectComplete(args) {
   }
 
   // Find project
-  const projectsResult = await gql(`{
-    team(id: "${TEAM_KEY}") {
-      projects(first: 50) { nodes { id name } }
-    }
-  }`);
-  const projects = projectsResult.data?.team?.projects?.nodes || [];
+  const projects = await fetchAllProjects('id name', 250);
   const project = projects.find(p => p.name.includes(projectName));
 
   if (!project) {
@@ -2033,21 +2031,9 @@ async function cmdMilestones(args) {
   const jsonOutput = opts.json;
   const countOnly = opts.count;
 
-  const query = `{
-    team(id: "${TEAM_KEY}") {
-      projects(first: 50) {
-        nodes {
-          id name state sortOrder
-          projectMilestones {
-            nodes { id name targetDate sortOrder status }
-          }
-        }
-      }
-    }
-  }`;
-
-  const result = await gql(query);
-  let projects = result.data?.team?.projects?.nodes || [];
+  let projects = await fetchAllProjects(
+    'id name state sortOrder projectMilestones { nodes { id name targetDate sortOrder status } }'
+  );
 
   // Sort projects by sortOrder descending (higher = first)
   projects.sort((a, b) => (b.sortOrder || 0) - (a.sortOrder || 0));
@@ -2159,35 +2145,10 @@ async function cmdMilestoneShow(args) {
   }
   const milestoneName = resolveAlias(milestoneNameArg);
 
-  const projectsQuery = `{
-    team(id: "${TEAM_KEY}") {
-      projects(first: 50) {
-        nodes {
-          name
-          projectMilestones {
-            nodes {
-              id name description targetDate status sortOrder
-            }
-          }
-        }
-      }
-    }
-  }`;
-
-  const issuesQuery = `{
-    team(id: "${TEAM_KEY}") {
-      issues(first: 200) {
-        nodes {
-          identifier title sortOrder state { name type }
-          projectMilestone { id }
-        }
-      }
-    }
-  }`;
-
-  const [projectsResult, issuesResult] = await Promise.all([gql(projectsQuery), gql(issuesQuery)]);
-  const projects = projectsResult.data?.team?.projects?.nodes || [];
-  const allIssues = issuesResult.data?.team?.issues?.nodes || [];
+  const [projects, allIssues] = await Promise.all([
+    fetchAllProjects('name projectMilestones { nodes { id name description targetDate status sortOrder } }'),
+    fetchAllIssues('identifier title sortOrder state { name type } projectMilestone { id }', 250),
+  ]);
 
   let milestone = null;
   let projectName = '';
@@ -2271,12 +2232,7 @@ async function cmdMilestoneCreate(args) {
   }
 
   // Find project
-  const projectsResult = await gql(`{
-    team(id: "${TEAM_KEY}") {
-      projects(first: 50) { nodes { id name } }
-    }
-  }`);
-  const projects = projectsResult.data?.team?.projects?.nodes || [];
+  const projects = await fetchAllProjects('id name', 250);
   const project = projects.find(p => p.name.toLowerCase().includes(projectName.toLowerCase()));
 
   if (!project) {
@@ -2318,39 +2274,16 @@ async function cmdRoadmap(args) {
   const showAll = opts.all || opts.a;
   const sortBy = opts.sort || 'manual';
 
-  // Fetch projects and milestones
-  const projectsQuery = `{
-    team(id: "${TEAM_KEY}") {
-      projects(first: 50) {
-        nodes {
-          id name state priority sortOrder targetDate startDate createdAt updatedAt
-          projectMilestones {
-            nodes {
-              id name targetDate status sortOrder
-            }
-          }
-        }
-      }
-    }
-  }`;
-
   // Fetch issues separately to avoid complexity limits
-  const issuesQuery = `{
-    team(id: "${TEAM_KEY}") {
-      issues(first: 200) {
-        nodes {
-          id identifier title state { name type } sortOrder priority
-          project { id }
-          projectMilestone { id }
-        }
-      }
-    }
-  }`;
-
-  const [projectsResult, issuesResult] = await Promise.all([gql(projectsQuery), gql(issuesQuery)]);
-
-  let projects = projectsResult.data?.team?.projects?.nodes || [];
-  const allIssues = issuesResult.data?.team?.issues?.nodes || [];
+  let [projects, allIssues] = await Promise.all([
+    fetchAllProjects(
+      'id name state priority sortOrder targetDate startDate createdAt updatedAt projectMilestones { nodes { id name targetDate status sortOrder } }'
+    ),
+    fetchAllIssues(
+      'id identifier title state { name type } sortOrder priority project { id } projectMilestone { id }',
+      250
+    ),
+  ]);
 
   // Sort projects
   if (sortBy === 'priority') {
@@ -2477,12 +2410,7 @@ async function cmdProjectsReorder(args) {
   }
 
   // Get all projects
-  const projectsResult = await gql(`{
-    team(id: "${TEAM_KEY}") {
-      projects(first: 50) { nodes { id name sortOrder } }
-    }
-  }`);
-  const allProjects = projectsResult.data?.team?.projects?.nodes || [];
+  const allProjects = await fetchAllProjects('id name sortOrder', 250);
 
   // Match provided names to projects
   const orderedProjects = [];
@@ -2539,12 +2467,7 @@ async function cmdProjectMove(args) {
   }
 
   // Get all projects
-  const projectsResult = await gql(`{
-    team(id: "${TEAM_KEY}") {
-      projects(first: 50) { nodes { id name sortOrder } }
-    }
-  }`);
-  const projects = projectsResult.data?.team?.projects?.nodes || [];
+  const projects = await fetchAllProjects('id name sortOrder', 250);
   projects.sort((a, b) => (b.sortOrder || 0) - (a.sortOrder || 0));
 
   const project = projects.find(p => p.name.toLowerCase().includes(projectName.toLowerCase()));
@@ -2608,17 +2531,7 @@ async function cmdMilestonesReorder(args) {
   }
 
   // Get project with milestones
-  const projectsResult = await gql(`{
-    team(id: "${TEAM_KEY}") {
-      projects(first: 50) {
-        nodes {
-          id name
-          projectMilestones { nodes { id name sortOrder } }
-        }
-      }
-    }
-  }`);
-  const projects = projectsResult.data?.team?.projects?.nodes || [];
+  const projects = await fetchAllProjects('id name projectMilestones { nodes { id name sortOrder } }');
   const project = projects.find(p => p.name.toLowerCase().includes(projectName.toLowerCase()));
 
   if (!project) {
@@ -2682,17 +2595,7 @@ async function cmdMilestoneMove(args) {
   }
 
   // Get all projects with milestones
-  const projectsResult = await gql(`{
-    team(id: "${TEAM_KEY}") {
-      projects(first: 50) {
-        nodes {
-          id name
-          projectMilestones { nodes { id name sortOrder } }
-        }
-      }
-    }
-  }`);
-  const projects = projectsResult.data?.team?.projects?.nodes || [];
+  const projects = await fetchAllProjects('id name projectMilestones { nodes { id name sortOrder } }');
 
   // Find milestone and its project
   let milestone = null;
@@ -2757,16 +2660,7 @@ async function cmdIssuesReorder(args) {
   }
 
   // Get issues to verify they exist
-  const query = `{
-    team(id: "${TEAM_KEY}") {
-      issues(first: 100) {
-        nodes { id identifier sortOrder }
-      }
-    }
-  }`;
-
-  const result = await gql(query);
-  const allIssues = result.data?.team?.issues?.nodes || [];
+  const allIssues = await fetchAllIssues('id identifier sortOrder', 250);
 
   // Match provided IDs to issues
   const orderedIssues = [];
@@ -2823,16 +2717,7 @@ async function cmdIssueMove(args) {
   }
 
   // Get issues
-  const query = `{
-    team(id: "${TEAM_KEY}") {
-      issues(first: 100) {
-        nodes { id identifier sortOrder }
-      }
-    }
-  }`;
-
-  const result = await gql(query);
-  const issues = result.data?.team?.issues?.nodes || [];
+  const issues = await fetchAllIssues('id identifier sortOrder', 250);
   issues.sort((a, b) => (b.sortOrder || 0) - (a.sortOrder || 0));
 
   const issue = issues.find(i => i.identifier === issueId.toUpperCase());
@@ -2882,16 +2767,7 @@ async function cmdIssueMove(args) {
 // ============================================================================
 
 async function cmdLabels() {
-  const query = `{
-    team(id: "${TEAM_KEY}") {
-      labels(first: 100) {
-        nodes { id name color description }
-      }
-    }
-  }`;
-
-  const result = await gql(query);
-  const labels = result.data?.team?.labels?.nodes || [];
+  const labels = await fetchAllLabels('id name color description', 250);
 
   console.log(colors.bold('Labels:\n'));
   if (labels.length === 0) {
@@ -2978,16 +2854,7 @@ async function cmdAlias(args) {
     }
 
     // Fetch projects to determine type (project vs milestone)
-    const query = `{
-      team(id: "${TEAM_KEY}") {
-        projects(first: 50) {
-          nodes { name }
-        }
-      }
-    }`;
-
-    const result = await gql(query);
-    const projects = result.data?.team?.projects?.nodes || [];
+    const projects = await fetchAllProjects('name', 250);
 
     // Check if alias target matches a project (using partial match)
     const matchesProject = target => {
@@ -3108,30 +2975,21 @@ async function cmdNext(args) {
   const viewerId = viewerResult.data?.viewer?.id;
 
   // Fetch unblocked issues (reuse logic from cmdIssues --unblocked)
-  const query = `{
-    team(id: "${TEAM_KEY}") {
-      issues(first: 100) {
-        nodes {
-          identifier
-          title
-          priority
-          sortOrder
-          state { name type }
-          project { name }
-          assignee { id name }
-          relations(first: 20) {
-            nodes {
-              type
-              relatedIssue { identifier state { type } }
-            }
-          }
-        }
+  let issues = await fetchAllIssues(`
+    identifier
+    title
+    priority
+    sortOrder
+    state { name type }
+    project { name }
+    assignee { id name }
+    relations(first: 20) {
+      nodes {
+        type
+        relatedIssue { identifier state { type } }
       }
     }
-  }`;
-
-  const result = await gql(query);
-  let issues = result.data?.team?.issues?.nodes || [];
+  `);
 
   // Collect all blocked issue IDs
   const blocked = new Set();
