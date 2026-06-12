@@ -778,6 +778,7 @@ async function cmdIssues(args) {
   if (unblocked) {
     const blocked = new Set();
     for (const issue of issues) {
+      if (['completed', 'canceled'].includes(issue.state.type)) continue; // a resolved blocker no longer blocks
       for (const rel of issue.relations?.nodes || []) {
         if (rel.type === 'blocks') {
           blocked.add(rel.relatedIssue.identifier);
@@ -2994,6 +2995,7 @@ async function cmdNext(args) {
   // Collect all blocked issue IDs
   const blocked = new Set();
   for (const issue of issues) {
+    if (['completed', 'canceled'].includes(issue.state.type)) continue; // a resolved blocker no longer blocks
     for (const rel of issue.relations?.nodes || []) {
       if (rel.type === 'blocks') {
         blocked.add(rel.relatedIssue.identifier);
